@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@600;700&family=Figtree:wght@400;600&display=swap">
 <link rel="stylesheet" href="../assets/css/base.css">
 <link rel="stylesheet" href="../assets/css/nav.css">
+<link rel="stylesheet" href="keuangan.css">
 </head>
 <body>
 <div id="velqo-nav"></div>
@@ -16,7 +17,30 @@
 <main class="page">
   <h1>Keuangan</h1>
   <p class="lead">Pengeluaran harian, pembelian persediaan, dan utang.</p>
-  <div class="panel">Isi halaman keuangan dipasang di sini.</div>
+
+  <div id="fin-app" class="fin">
+    <nav class="fin-tabs" aria-label="Menu keuangan">
+      <a href="#dashboard" data-r="dashboard">Ringkasan</a>
+      <a href="#kasbank" data-r="kasbank">Kas &amp; Bank</a>
+      <a href="#penjualan" data-r="penjualan">Penjualan</a>
+      <a href="#pembelian" data-r="pembelian">Pembelian</a>
+      <a href="#akun" data-r="akun">Daftar Akun</a>
+      <a href="#jurnal" data-r="jurnal">Jurnal Umum</a>
+      <a href="#laporan" data-r="laporan">Laporan</a>
+      <a href="#pengaturan" data-r="pengaturan">Pengaturan</a>
+      <span id="modeTag" class="fin-mode"></span>
+    </nav>
+    <div id="fin-view" aria-live="polite"><div class="empty">Memuat data…</div></div>
+
+    <dialog id="dlg">
+      <div class="dh"><b id="dt"></b><button id="dx" type="button" aria-label="Tutup">×</button></div>
+      <div class="db" id="dbody"></div>
+      <div class="df" id="dfoot"></div>
+    </dialog>
+  </div>
 </main>
+<div id="fin-toast" role="status"></div>
+
+<script src="keuangan.js"></script>
 </body>
 </html>
