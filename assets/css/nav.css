@@ -1,0 +1,56 @@
+/* Gaya navigasi. Memakai warna dari base.css. */
+#velqo-nav { min-height: 56px; } /* menahan tinggi supaya halaman tidak melompat saat menu dimuat */
+
+.vnav {
+  background: var(--surface, #fff);
+  border-bottom: 1px solid var(--line, #dce3e0);
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 10;
+}
+.vnav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.vnav-brand {
+  font: 700 20px var(--font-display, system-ui, sans-serif);
+  letter-spacing: -0.01em;
+  color: var(--ink, #14201d);
+  text-decoration: none;
+}
+.vnav-list { list-style: none; margin: 0; padding: 0; display: flex; gap: 2px; flex-wrap: wrap; }
+.vnav-list a {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 4px;
+  color: var(--muted, #5b6b66);
+  text-decoration: none;
+  font: 600 14px var(--font-body, system-ui, sans-serif);
+}
+.vnav-list a:hover { color: var(--ink, #14201d); background: var(--accent-soft, #ddefea); }
+.vnav-list a[aria-current="page"] { color: var(--accent, #0f6b5c); background: var(--accent-soft, #ddefea); }
+
+.vnav-toggle {
+  display: none;
+  margin-left: auto;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--ink, #14201d);
+  border: 1px solid var(--line, #dce3e0);
+  border-radius: 4px;
+  font: 600 14px var(--font-body, system-ui, sans-serif);
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .vnav-toggle { display: block; }
+  .vnav-list { display: none; width: 100%; flex-direction: column; padding-bottom: 10px; }
+  .vnav.open .vnav-list { display: flex; }
+}
