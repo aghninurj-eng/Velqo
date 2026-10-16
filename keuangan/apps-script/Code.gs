@@ -5,15 +5,23 @@
  */
 
 // GANTI token ini dengan kata sandi acak Anda sendiri. Token yang sama diisi di halaman Pengaturan.
+// Alternatif yang lebih aman: simpan di Project Settings > Script Properties dengan nama TOKEN.
+// Jika properti itu ada, nilainya dipakai dan baris di bawah diabaikan, sehingga token tidak
+// perlu ditulis di kode (dan tidak ikut ter-commit ke GitHub).
 const TOKEN = 'GANTI_TOKEN_RAHASIA';
 
 const SHEETS = {
-  Akun:    ['kode', 'nama', 'tipe', 'kategori'],
-  Jurnal:  ['id', 'tanggal', 'nomor', 'keterangan', 'kode_akun', 'debit', 'kredit', 'sumber', 'ref'],
-  Faktur:  ['id', 'jenis', 'nomor', 'tanggal', 'jatuh_tempo', 'pihak', 'keterangan', 'akun', 'subtotal', 'ppn', 'total', 'terbayar'],
-  KasBank: ['id', 'tanggal', 'nomor', 'jenis', 'akun_kas', 'akun_lawan', 'jumlah', 'keterangan'],
+  Akun:      ['kode', 'nama', 'tipe', 'kategori'],
+  Jurnal:    ['id', 'tanggal', 'nomor', 'keterangan', 'kode_akun', 'debit', 'kredit', 'sumber', 'ref'],
+  Faktur:    ['id', 'jenis', 'nomor', 'tanggal', 'jatuh_tempo', 'pihak', 'keterangan', 'akun', 'subtotal', 'ppn', 'total', 'terbayar'],
+  KasBank:   ['id', 'tanggal', 'nomor', 'jenis', 'akun_kas', 'akun_lawan', 'jumlah', 'keterangan'],
+  // Persediaan: master produk, rincian barang per faktur, dan buku mutasi stok (qty/nilai bertanda: masuk +, keluar -).
+  Produk:    ['id', 'kode', 'nama', 'satuan', 'stok_min'],
+  FakturItem:['id', 'faktur_id', 'produk_id', 'qty', 'harga', 'subtotal'],
+  Stok:      ['id', 'tanggal', 'nomor', 'produk_id', 'jenis', 'qty', 'harga', 'nilai', 'keterangan', 'ref'],
 };
-const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah'];
+const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah', 'qty', 'harga', 'nilai', 'stok_min'];
+const DECIMAL = ['qty', 'harga', 'stok_min'];
 
 const COA = [
   ['1100', 'Kas', 'Aset', 'Kas & Bank'],
@@ -50,7 +58,7 @@ function setup() {
     // Kolom non-angka dipaksa teks agar "1100", "2026-10-15", "INV/202610/0001" tidak diubah Sheets.
     headers.forEach(function (h, i) {
       const rng = sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1);
-      rng.setNumberFormat(NUMERIC.indexOf(h) >= 0 ? '#,##0' : '@');
+      rng.setNumberFormat(NUMERIC.indexOf(h) >= 0 ? (DECIMAL.indexOf(h) >= 0 ? '#,##0.####' : '#,##0') : '@');
     });
   });
   const akun = ss.getSheetByName('Akun');
@@ -79,6 +87,13 @@ function doPost(e) {
     lock.waitLock(20000);
     const b = JSON.parse(e.postData.contents);
     if (!authorized_(b.token)) return json_({ ok: false, error: 'Token salah' });
+    if (b.action === 'multi') {
+      // Beberapa sheet sekaligus dalam satu kunci, supaya faktur + item + stok + jurnal tersimpan bersama.
+      const ops = b.ops || [];
+      for (let i = 0; i < ops.length; i++) if (!SHEETS[ops[i].sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal: ' + ops[i].sheet });
+      ops.forEach(function (op) { append_(op.sheet, op.rows); });
+      return json_({ ok: true });
+    }
     if (!SHEETS[b.sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal' });
     if (b.action === 'append') append_(b.sheet, b.rows);
     else if (b.action === 'update') update_(b.sheet, b.field, b.value, b.patch);
@@ -92,7 +107,15 @@ function doPost(e) {
   }
 }
 
-function authorized_(t) { return TOKEN !== 'GANTI_TOKEN_RAHASIA' && t === TOKEN; }
+function token_() {
+  const p = PropertiesService.getScriptProperties().getProperty('TOKEN');
+  return p || TOKEN;
+}
+
+function authorized_(t) {
+  const real = token_();
+  return real !== 'GANTI_TOKEN_RAHASIA' && t === real;
+}
 
 function json_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);

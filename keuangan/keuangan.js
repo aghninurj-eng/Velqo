@@ -28,17 +28,22 @@ const DEFAULT_COA = [
   ['5100','Harga Pokok Penjualan','Beban','HPP'],['5200','Beban Gaji','Beban','Beban Operasional'],['5300','Beban Sewa','Beban','Beban Operasional'],
   ['5400','Beban Listrik, Air & Internet','Beban','Beban Operasional'],['5500','Beban Perlengkapan','Beban','Beban Operasional'],['5600','Beban Lain-lain','Beban','Beban Lain']
 ].map(([kode, nama, tipe, kategori]) => ({ kode, nama, tipe, kategori }));
-const AK = { piutang: '1300', ppnMasuk: '1400', hutang: '2100', ppnKeluar: '2200', penjualan: '4100', pembelian: '5100', modal: '3100' };
-const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'] };
+const AK = { piutang: '1300', ppnMasuk: '1400', persediaan: '1500', hutang: '2100', ppnKeluar: '2200', penjualan: '4100', pembelian: '5100', modal: '3100' };
+const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'], Produk: ['stok_min'], FakturItem: ['qty', 'harga', 'subtotal'], Stok: ['qty', 'harga', 'nilai'] };
+const SHEET_NAMES = ['Akun', 'Jurnal', 'Faktur', 'KasBank', 'Produk', 'FakturItem', 'Stok'];
+const EPS = 0.00005;
+const rq = n => Math.round(num(n) * 10000) / 10000; // kuantitas dibulatkan 4 desimal agar tidak ada sisa pecahan
+const fq = n => rq(n).toLocaleString('id-ID', { maximumFractionDigits: 4 });
 const TIPE = ['Aset', 'Kewajiban', 'Ekuitas', 'Pendapatan', 'Beban'];
 const DEBIT_NORMAL = { Aset: true, Beban: true };
 
 const saved = (() => { try { return JSON.parse(localStorage.getItem('velqo_cfg') || '{}'); } catch { return {}; } })();
 const API_URL = saved.url || CONFIG.API_URL, TOKEN = saved.token || CONFIG.TOKEN;
-let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [] };
+let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [] };
 
 const Store = {
   live: !!API_URL,
+  invReady: true, // false bila Code.gs di Apps Script belum diperbarui (belum punya sheet Produk/Stok)
   async post(body) {
     const r = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, token: TOKEN }) });
     const j = await r.json();
@@ -51,18 +56,28 @@ const Store = {
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || 'Gagal memuat data');
       S = j.data;
+      this.invReady = ['Produk', 'FakturItem', 'Stok'].every(k => Array.isArray(S[k]));
     } else {
       const raw = localStorage.getItem('velqo_demo');
       if (raw) S = JSON.parse(raw);
-      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [] }; await seedDemo(); }
+      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [] }; await seedDemo(); }
     }
-    for (const k of ['Akun', 'Jurnal', 'Faktur', 'KasBank']) S[k] = S[k] || [];
+    for (const k of SHEET_NAMES) S[k] = S[k] || [];
     for (const k in NUMF) S[k].forEach(r => NUMF[k].forEach(f => r[f] = num(r[f])));
     S.Jurnal.forEach(j => j.kode_akun = String(j.kode_akun));
     S.Akun.forEach(a => a.kode = String(a.kode));
   },
   save() { if (!this.live) localStorage.setItem('velqo_demo', JSON.stringify(S)); },
   async append(sheet, rows) { if (this.live) await this.post({ action: 'append', sheet, rows }); S[sheet].push(...rows); this.save(); },
+  // Simpan beberapa sheet dalam satu permintaan ({Faktur:[...], Stok:[...], Jurnal:[...]}) agar tidak setengah jadi.
+  async appendMany(map) {
+    const ops = Object.entries(map).filter(([, rows]) => rows.length).map(([sheet, rows]) => ({ sheet, rows }));
+    if (this.live && ops.length) {
+      if (this.invReady) await this.post({ action: 'multi', ops });
+      else for (const op of ops) await this.post({ action: 'append', sheet: op.sheet, rows: op.rows }); // Code.gs lama
+    }
+    ops.forEach(op => S[op.sheet].push(...op.rows)); this.save();
+  },
   async update(sheet, field, value, patch) {
     if (this.live) await this.post({ action: 'update', sheet, field, value, patch });
     const r = S[sheet].find(x => String(x[field]) === String(value)); if (r) Object.assign(r, patch); this.save();
@@ -84,7 +99,7 @@ function nextNo(prefix, date) {
   S.Jurnal.forEach(j => { if (j.nomor.startsWith(pre)) max = Math.max(max, parseInt(j.nomor.slice(pre.length)) || 0); });
   return pre + String(max + 1).padStart(4, '0');
 }
-async function post({ tanggal, nomor, keterangan, sumber, ref, lines }) {
+function jurnalRows({ tanggal, nomor, keterangan, sumber, ref, lines }) {
   const d = lines.reduce((a, l) => a + num(l.debit), 0), k = lines.reduce((a, l) => a + num(l.kredit), 0);
   if (Math.abs(d - k) > 0.005) throw new Error('Jurnal tidak seimbang');
   const rows = lines.filter(l => num(l.debit) || num(l.kredit)).map(l => ({
@@ -92,7 +107,63 @@ async function post({ tanggal, nomor, keterangan, sumber, ref, lines }) {
     debit: num(l.debit), kredit: num(l.kredit), sumber, ref: ref || ''
   }));
   if (!rows.length) throw new Error('Jumlah tidak boleh nol');
-  await Store.append('Jurnal', rows);
+  return rows;
+}
+async function post(o) { await Store.append('Jurnal', jurnalRows(o)); }
+
+/* ============ PERSEDIAAN ============
+   Metode nilai: rata-rata bergerak (moving average). Buku mutasi sheet Stok memakai qty dan nilai bertanda
+   (masuk +, keluar -), jadi total nilai Stok selalu sama dengan saldo akun 1500 Persediaan dari transaksi ini. */
+const produkBy = id => S.Produk.find(p => p.id === id);
+const produkNama = id => { const p = produkBy(id); return p ? p.nama : '(produk dihapus)'; };
+function stokMap(rows = S.Stok) {
+  const m = {};
+  for (const s of rows) { const o = m[s.produk_id] || (m[s.produk_id] = { qty: 0, nilai: 0 }); o.qty = rq(o.qty + s.qty); o.nilai += s.nilai; }
+  return m;
+}
+function stokOf(id, m = stokMap()) {
+  const o = m[id] || { qty: 0, nilai: 0 };
+  return { qty: o.qty, nilai: Math.round(o.nilai), avg: o.qty > EPS ? o.nilai / o.qty : 0 };
+}
+function needInv() { if (!Store.invReady) throw new Error('Fitur persediaan belum aktif di Spreadsheet. Perbarui Code.gs di Apps Script, jalankan setup(), lalu deploy versi baru.'); }
+// Menolak penghapusan bila stok sebuah produk akan minus (barang dari transaksi itu sudah terjual/terpakai).
+function cekStokSetelahHapus(ref) {
+  const after = stokMap(S.Stok.filter(s => s.ref !== ref));
+  for (const pid in after) if (after[pid].qty < -EPS) throw new Error('Tidak bisa dihapus: stok ' + produkNama(pid) + ' akan minus karena barangnya sudah terpakai transaksi lain.');
+}
+function nextKodeProduk() {
+  let max = 0; S.Produk.forEach(p => { const n = parseInt(String(p.kode).replace(/\D/g, '')) || 0; if (n > max) max = n; });
+  return 'P-' + String(max + 1).padStart(3, '0');
+}
+// Penyesuaian stok manual: 'masuk' (saldo awal / koreksi lebih) atau 'keluar' (rusak / hilang / dipakai).
+async function createAdj({ tanggal, produk_id, jenis, qty, harga, akun_lawan, keterangan }) {
+  needInv();
+  const p = produkBy(produk_id); if (!p) throw new Error('Produk tidak ditemukan');
+  qty = rq(qty); if (qty <= 0) throw new Error('Kuantitas harus lebih dari nol');
+  if (!akunBy(akun_lawan)) throw new Error('Akun lawan tidak valid');
+  const cur = stokOf(produk_id), id = uid(), nomor = nextNo('ADJ', tanggal);
+  let nilai, hargaSat, lines;
+  if (jenis === 'masuk') {
+    hargaSat = num(harga); if (hargaSat <= 0) throw new Error('Harga satuan wajib diisi');
+    nilai = Math.round(qty * hargaSat);
+    lines = [{ kode: AK.persediaan, debit: nilai }, { kode: akun_lawan, kredit: nilai }];
+  } else {
+    if (qty > cur.qty + EPS) throw new Error('Stok ' + p.nama + ' tidak cukup (tersedia ' + fq(cur.qty) + ' ' + p.satuan + ')');
+    nilai = Math.abs(qty - cur.qty) < EPS ? cur.nilai : Math.round(qty * cur.avg); hargaSat = cur.avg;
+    lines = [{ kode: akun_lawan, debit: nilai }, { kode: AK.persediaan, kredit: nilai }];
+  }
+  const sign = jenis === 'masuk' ? 1 : -1;
+  const row = { id, tanggal, nomor, produk_id, jenis: 'adj', qty: sign * qty, harga: Math.round(hargaSat * 100) / 100, nilai: sign * nilai, keterangan: keterangan || '', ref: id };
+  const jr = jurnalRows({ tanggal, nomor, keterangan: 'Penyesuaian stok ' + p.nama + (keterangan ? ' - ' + keterangan : ''), sumber: 'ADJ', ref: id, lines });
+  await Store.appendMany({ Stok: [row], Jurnal: jr });
+}
+async function hapusAdj(ref) {
+  cekStokSetelahHapus(ref);
+  await Store.remove('Jurnal', 'ref', ref); await Store.remove('Stok', 'ref', ref);
+}
+async function hapusProduk(id) {
+  if (S.Stok.some(s => s.produk_id === id) || S.FakturItem.some(i => i.produk_id === id)) throw new Error('Produk sudah punya transaksi, tidak bisa dihapus');
+  await Store.remove('Produk', 'id', id);
 }
 function sums(from, to) {
   const m = {};
@@ -115,17 +186,50 @@ const labaRugi = (from, to) => {
   return { pend, beban, tp, tb, laba: tp - tb };
 };
 
-async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn }) {
+/* Faktur. Jika `items` ([{produk_id, qty, harga}]) diisi:
+   - pembelian: subtotal = total item, jurnal Dr 1500 Persediaan, stok masuk sebesar nilai pembelian (PPN tidak dikapitalisasi);
+   - penjualan: subtotal = total harga jual, stok keluar pada harga rata-rata, jurnal tambahan Dr 5100 HPP / Cr 1500.
+   Tanpa items, perilaku sama seperti sebelumnya (akun dan subtotal manual). */
+async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items }) {
   const sales = jenis === 'penjualan';
-  const nomor = nextNo(sales ? 'INV' : 'BILL', tanggal);
+  items = (items || []).filter(i => i.produk_id && num(i.qty) > 0).map(i => ({ produk_id: i.produk_id, qty: rq(i.qty), harga: num(i.harga) }));
+  const useItems = items.length > 0;
+  let itemRows = [], stokRows = [], cogs = 0;
+  const id = uid(), nomor = nextNo(sales ? 'INV' : 'BILL', tanggal);
+  if (useItems) {
+    needInv();
+    items.forEach(i => { if (!produkBy(i.produk_id)) throw new Error('Produk tidak ditemukan'); if (i.harga < 0) throw new Error('Harga tidak boleh negatif'); });
+    itemRows = items.map(i => ({ id: uid(), faktur_id: id, produk_id: i.produk_id, qty: i.qty, harga: i.harga, subtotal: Math.round(i.qty * i.harga) }));
+    subtotal = itemRows.reduce((a, r) => a + r.subtotal, 0);
+    akun = sales ? AK.penjualan : AK.persediaan;
+    if (sales) {
+      const cur = stokMap();
+      for (const r of itemRows) {
+        const o = cur[r.produk_id] || (cur[r.produk_id] = { qty: 0, nilai: 0 }), p = produkBy(r.produk_id);
+        if (r.qty > o.qty + EPS) throw new Error('Stok ' + p.nama + ' tidak cukup (tersedia ' + fq(o.qty) + ' ' + p.satuan + ')');
+        const nilai = Math.abs(r.qty - o.qty) < EPS ? o.nilai : Math.round(r.qty * (o.nilai / o.qty));
+        stokRows.push({ id: uid(), tanggal, nomor, produk_id: r.produk_id, jenis: 'jual', qty: -r.qty, harga: Math.round(nilai / r.qty * 100) / 100, nilai: -nilai, keterangan: 'Penjualan ke ' + pihak, ref: id });
+        o.qty = rq(o.qty - r.qty); o.nilai -= nilai; cogs += nilai;
+      }
+    } else {
+      stokRows = itemRows.map(r => ({ id: uid(), tanggal, nomor, produk_id: r.produk_id, jenis: 'beli', qty: r.qty, harga: r.harga, nilai: r.subtotal, keterangan: 'Pembelian dari ' + pihak, ref: id }));
+    }
+  }
   const ppnAmt = ppn ? Math.round(subtotal * 0.11) : 0, total = subtotal + ppnAmt;
-  const f = { id: uid(), jenis, nomor, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn: ppnAmt, total, terbayar: 0 };
+  const f = { id, jenis, nomor, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn: ppnAmt, total, terbayar: 0 };
   const lines = sales
-    ? [{ kode: AK.piutang, debit: total }, { kode: akun, kredit: subtotal }, { kode: AK.ppnKeluar, kredit: ppnAmt }]
+    ? [{ kode: AK.piutang, debit: total }, { kode: akun, kredit: subtotal }, { kode: AK.ppnKeluar, kredit: ppnAmt }, { kode: AK.pembelian, debit: cogs }, { kode: AK.persediaan, kredit: cogs }]
     : [{ kode: akun, debit: subtotal }, { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
-  await Store.append('Faktur', [f]);
-  await post({ tanggal, nomor, keterangan: (sales ? 'Penjualan ke ' : 'Pembelian dari ') + pihak + (keterangan ? ' - ' + keterangan : ''), sumber: sales ? 'INV' : 'BILL', ref: f.id, lines });
+  const jr = jurnalRows({ tanggal, nomor, keterangan: (sales ? 'Penjualan ke ' : 'Pembelian dari ') + pihak + (keterangan ? ' - ' + keterangan : ''), sumber: sales ? 'INV' : 'BILL', ref: id, lines });
+  await Store.appendMany({ Faktur: [f], FakturItem: itemRows, Stok: stokRows, Jurnal: jr });
   return f;
+}
+async function hapusFaktur(f) {
+  if (f.terbayar > 0) throw new Error('Faktur sudah ada pembayaran');
+  cekStokSetelahHapus(f.id);
+  await Store.remove('Jurnal', 'ref', f.id);
+  if (Store.invReady) { await Store.remove('FakturItem', 'faktur_id', f.id); await Store.remove('Stok', 'ref', f.id); }
+  await Store.remove('Faktur', 'id', f.id);
 }
 async function payFaktur(f, { tanggal, akun_kas, jumlah }) {
   const sales = f.jenis === 'penjualan';
@@ -158,13 +262,29 @@ async function seedDemo() {
   // Tanggal demo tidak boleh melewati hari ini; hari dibatasi 1-28 agar aman di semua bulan.
   const d = (m, day) => { const x = new Date(), t = x.getDate(); x.setDate(1); x.setMonth(x.getMonth() - m); x.setDate(Math.min(Math.max(day, 1), 28, m === 0 ? t : 28)); return ymd(x); };
   await post({ tanggal: d(5, 1), nomor: 'JU/DEMO/0001', keterangan: 'Setoran modal awal', sumber: 'JU', lines: [{ kode: '1100', debit: 20000000 }, { kode: '1200', debit: 60000000 }, { kode: '3100', kredit: 80000000 }] });
-  const sample = [[4, 5, 12000000, 'Toko Maju Jaya'], [3, 9, 15500000, 'CV Sinar Terang'], [2, 12, 18000000, 'Toko Maju Jaya'], [1, 8, 21000000, 'PT Bintang Mulia'], [0, 2, 9000000, 'CV Sinar Terang']];
-  for (const [m, day, amt, pihak] of sample) {
-    const f = await createFaktur({ jenis: 'penjualan', tanggal: d(m, day), jatuh_tempo: d(m, day + 14 > 28 ? 28 : day + 14), pihak, keterangan: 'Penjualan produk', akun: AK.penjualan, subtotal: amt, ppn: false });
-    if (m >= 1) await payFaktur(f, { tanggal: d(m, Math.min(day + 10, 28)), akun_kas: '1200', jumlah: f.total });
+  const prod = [['P-001', 'Produk Contoh A', 'pcs', 20], ['P-002', 'Produk Contoh B', 'kg', 10], ['P-003', 'Produk Contoh C', 'dus', 5]]
+    .map(([kode, nama, satuan, stok_min]) => ({ id: uid(), kode, nama, satuan, stok_min }));
+  await Store.append('Produk', prod);
+  const [A, B, C] = prod.map(p => p.id);
+  // Transaksi berurutan menurut tanggal: [bulan lalu, hari, jenis, pihak, [[produk, qty, harga]]]
+  const events = [
+    [4, 3, 'beli', 'Supplier Bahan', [[A, 300, 30000], [B, 150, 50000]]],
+    [4, 5, 'jual', 'Toko Maju Jaya', [[A, 100, 55000], [B, 70, 85000]]],
+    [3, 9, 'jual', 'CV Sinar Terang', [[A, 120, 55000], [B, 50, 85000]]],
+    [2, 6, 'beli', 'Supplier Bahan', [[A, 200, 32000], [C, 100, 85000]]],
+    [2, 12, 'jual', 'Toko Maju Jaya', [[A, 150, 55000], [C, 60, 140000]]],
+    [1, 8, 'jual', 'PT Bintang Mulia', [[A, 100, 55000], [B, 20, 85000], [C, 30, 140000]]],
+    [0, 2, 'jual', 'CV Sinar Terang', [[A, 10, 55000], [C, 10, 140000]]],
+    [0, 3, 'beli', 'Supplier Bahan', [[B, 100, 52000], [C, 40, 87000]]]
+  ];
+  for (const [m, day, jenis, pihak, rows] of events) {
+    const f = await createFaktur({
+      jenis: jenis === 'jual' ? 'penjualan' : 'pembelian', tanggal: d(m, day), jatuh_tempo: d(m, day + 14 > 28 ? 28 : day + 14), pihak,
+      keterangan: jenis === 'jual' ? 'Penjualan produk' : 'Pembelian persediaan', ppn: false,
+      items: rows.map(([produk_id, qty, harga]) => ({ produk_id, qty, harga }))
+    });
+    if (jenis === 'jual' && m >= 1) await payFaktur(f, { tanggal: d(m, Math.min(day + 10, 28)), akun_kas: '1200', jumlah: f.total });
   }
-  for (const [m, day, amt, pihak] of [[4, 7, 5000000, 'Supplier Bahan'], [2, 6, 7000000, 'Supplier Bahan'], [0, 3, 4000000, 'Supplier Bahan']])
-    await createFaktur({ jenis: 'pembelian', tanggal: d(m, day), jatuh_tempo: d(m, 25), pihak, keterangan: 'Pembelian bahan', akun: AK.pembelian, subtotal: amt, ppn: false });
   for (let m = 4; m >= 0; m--) {
     await createKas({ jenis: 'keluar', tanggal: d(m, 25), akun_kas: '1200', akun_lawan: '5200', jumlah: 6000000, keterangan: 'Gaji karyawan' });
     await createKas({ jenis: 'keluar', tanggal: d(m, 26), akun_kas: '1100', akun_lawan: '5300', jumlah: 2500000, keterangan: 'Sewa tempat usaha' });
@@ -217,6 +337,7 @@ function pDashboard() {
     <a class="card click" href="#kasbank" style="text-decoration:none;color:inherit"><div class="l">Saldo Kas &amp; Bank</div><div class="v">${rp(kas)}</div></a>
     <a class="card click" href="#penjualan" style="text-decoration:none;color:inherit"><div class="l">Piutang Usaha</div><div class="v">${rp(piu)}</div></a>
     <a class="card click" href="#pembelian" style="text-decoration:none;color:inherit"><div class="l">Hutang Usaha</div><div class="v">${rp(hut)}</div></a>
+    <a class="card click" href="#persediaan" style="text-decoration:none;color:inherit"><div class="l">Nilai Persediaan</div><div class="v">${rp(akunBy(AK.persediaan) ? saldo(akunBy(AK.persediaan), m) : 0)}</div></a>
     <div class="card"><div class="l">Laba bulan ini</div><div class="v ${lr.laba < 0 ? 'bad' : 'ok'}">${rp(lr.laba)}</div></div>
   </div>
   <div class="grid2">
@@ -279,31 +400,84 @@ function bindFaktur(jenis) {
 function fakturForm(jenis) {
   const sales = jenis === 'penjualan';
   const due = new Date(); due.setDate(due.getDate() + 14);
+  const canInv = Store.invReady, hasProd = canInv && S.Produk.length > 0;
+  const prodOpts = [['', '— pilih produk —'], ...S.Produk.slice().sort((x, y) => x.kode.localeCompare(y.kode)).map(p => [p.id, p.kode + ' · ' + p.nama + ' (' + p.satuan + ')'])];
+  const row = () => `<tr><td>${sel('produk_id', prodOpts, '')}<div class="mut stk"></div></td>
+    <td><input type="number" name="qty" min="0" step="any" class="r" placeholder="0"></td>
+    <td><input type="number" name="harga" min="0" step="any" class="r" placeholder="0"></td>
+    <td class="r sub">Rp 0</td><td><button type="button" class="sm" data-rm aria-label="Hapus baris">×</button></td></tr>`;
   modal('Faktur ' + (sales ? 'Penjualan' : 'Pembelian'), `<form id="ff" class="f">
     <div><label>Tanggal</label><input type="date" name="tanggal" value="${today()}" required></div>
     <div><label>Jatuh tempo</label><input type="date" name="jatuh_tempo" value="${ymd(due)}" required></div>
     <div class="full"><label>${sales ? 'Pelanggan' : 'Pemasok'}</label><input name="pihak" required></div>
     <div class="full"><label>Keterangan</label><input name="keterangan"></div>
-    <div class="full"><label>${sales ? 'Akun pendapatan' : 'Akun pembelian / beban'}</label>${sel('akun', akunOpts(a => sales ? a.tipe === 'Pendapatan' : a.tipe === 'Beban' || a.kategori === 'Persediaan'), sales ? AK.penjualan : AK.pembelian)}</div>
-    <div><label>Subtotal (Rp)</label><input type="number" name="subtotal" min="1" step="any" required></div>
-    <div class="chk" style="padding-top:18px"><input type="checkbox" name="ppn" id="ppn"><label for="ppn" style="margin:0;font-size:13px;color:var(--tx)">Kenakan PPN 11%</label></div>
+    ${canInv ? `<div class="full"><label>Isi faktur</label><select name="mode" id="mode">
+      <option value="items" ${hasProd ? 'selected' : ''}>Barang persediaan (${sales ? 'stok berkurang, HPP otomatis' : 'stok bertambah'})</option>
+      <option value="manual" ${hasProd ? '' : 'selected'}>Tanpa produk (jasa / lainnya)</option></select></div>` : `<div class="full note">Rincian barang belum aktif karena Code.gs di Apps Script belum diperbarui. Faktur tetap bisa dibuat dengan subtotal manual.</div><input type="hidden" name="mode" id="mode" value="manual">`}
+    <div class="full" id="blkItems">
+      ${hasProd ? `<table class="itm"><tr><th>Produk</th><th class="r" style="width:90px">Qty</th><th class="r" style="width:130px">Harga satuan</th><th class="r" style="width:120px">Subtotal</th><th style="width:34px"></th></tr>${row()}${row()}</table>
+      <div class="bar" style="margin-top:8px"><button type="button" id="addrow">+ Baris</button></div>`
+        : `<div class="note">Belum ada produk. Tambahkan dulu di tab <a href="#persediaan" data-close>Persediaan</a>, atau pilih "Tanpa produk".</div>`}
+    </div>
+    <div class="full f" id="blkManual" style="padding:0">
+      <div class="full"><label>${sales ? 'Akun pendapatan' : 'Akun pembelian / beban'}</label>${sel('akun', akunOpts(a => sales ? a.tipe === 'Pendapatan' : a.tipe === 'Beban' || a.kategori === 'Persediaan'), sales ? AK.penjualan : AK.pembelian)}</div>
+      <div><label>Subtotal (Rp)</label><input type="number" name="subtotal" min="0" step="any"></div>
+    </div>
+    <div class="chk full"><input type="checkbox" name="ppn" id="ppn"><label for="ppn">Kenakan PPN 11%</label></div>
     <div class="full mut" id="tot"></div></form>`,
-    `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`);
-  const upd = () => { const f = $('#ff'); const s = num(f.elements.subtotal.value), p = f.elements.ppn.checked ? Math.round(s * .11) : 0; $('#tot').textContent = 'Total: ' + rp(s + p) + (p ? ' (PPN ' + rp(p) + ')' : ''); };
-  $('#ff').oninput = upd; upd();
-  $('#ok').onclick = () => { const f = $('#ff'); if (!f.reportValidity()) return; const v = Object.fromEntries(new FormData(f)); run(() => createFaktur({ jenis, tanggal: v.tanggal, jatuh_tempo: v.jatuh_tempo, pihak: v.pihak.trim(), keterangan: v.keterangan.trim(), akun: v.akun, subtotal: num(v.subtotal), ppn: !!v.ppn }), 'Faktur tersimpan'); };
+    `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`, true);
+  const items = () => $$('#ff .itm tr').slice(1).map(tr => ({ tr, produk_id: $('[name=produk_id]', tr).value, qty: num($('[name=qty]', tr).value), harga: num($('[name=harga]', tr).value) }));
+  const upd = () => {
+    const f = $('#ff'), manual = f.elements.mode.value === 'manual';
+    $('#blkItems').style.display = manual ? 'none' : ''; $('#blkManual').style.display = manual ? '' : 'none';
+    let sub = 0;
+    if (manual) sub = num(f.elements.subtotal.value);
+    else {
+      const m = stokMap();
+      items().forEach(({ tr, produk_id, qty, harga }) => {
+        const line = Math.round(qty * harga); sub += line; $('.sub', tr).textContent = rp(line);
+        const el = $('.stk', tr), p = produkBy(produk_id);
+        if (!p) { el.textContent = ''; el.classList.remove('bad'); return; }
+        const o = stokOf(produk_id, m);
+        el.textContent = 'Stok ' + fq(o.qty) + ' ' + p.satuan + ' · rata-rata ' + rp(o.avg);
+        el.classList.toggle('bad', sales && qty > o.qty + EPS);
+      });
+    }
+    const pp = f.elements.ppn.checked ? Math.round(sub * .11) : 0;
+    $('#tot').textContent = 'Total: ' + rp(sub + pp) + (pp ? ' (PPN ' + rp(pp) + ')' : '');
+  };
+  $('#ff').oninput = upd; $('#ff').onchange = upd; upd();
+  if ($('#addrow')) $('#addrow').onclick = () => { $('#ff .itm').insertAdjacentHTML('beforeend', row()); };
+  $('#ff').onclick = e => { if (e.target.dataset.rm !== undefined && $$('#ff .itm tr').length > 2) { e.target.closest('tr').remove(); upd(); } };
+  $$('#blkItems a[data-close]').forEach(a => a.onclick = () => dlg.close());
+  $('#ok').onclick = () => {
+    const f = $('#ff'); if (!f.reportValidity()) return;
+    const v = Object.fromEntries(new FormData(f)), manual = v.mode === 'manual';
+    const base = { jenis, tanggal: v.tanggal, jatuh_tempo: v.jatuh_tempo, pihak: v.pihak.trim(), keterangan: v.keterangan.trim(), ppn: !!v.ppn };
+    if (manual) {
+      if (num(v.subtotal) <= 0) return toast('Subtotal wajib diisi', true);
+      return run(() => createFaktur({ ...base, akun: v.akun, subtotal: num(v.subtotal) }), 'Faktur tersimpan');
+    }
+    const rows = items().filter(r => r.produk_id || r.qty || r.harga);
+    if (!rows.length) return toast('Isi minimal satu baris barang', true);
+    if (rows.some(r => !r.produk_id || r.qty <= 0 || r.harga <= 0)) return toast('Lengkapi produk, qty, dan harga di setiap baris', true);
+    run(() => createFaktur({ ...base, items: rows.map(r => ({ produk_id: r.produk_id, qty: r.qty, harga: r.harga })) }), 'Faktur tersimpan');
+  };
 }
 function fakturDetail(id) {
   const f = S.Faktur.find(x => x.id === id); if (!f) return;
   const sales = f.jenis === 'penjualan', sisa = f.total - f.terbayar, [t, c] = fakturStatus(f);
   const pays = S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY') && ![AK.piutang, AK.hutang].includes(j.kode_akun));
+  const its = S.FakturItem.filter(i => i.faktur_id === f.id);
+  const hpp = -S.Stok.filter(x => x.ref === f.id && x.jenis === 'jual').reduce((a, x) => a + x.nilai, 0);
   modal(f.nomor, `<div class="f" style="margin-bottom:12px">
     <div><div class="mut">${sales ? 'Pelanggan' : 'Pemasok'}</div>${esc(f.pihak)}</div><div><div class="mut">Status</div><span class="tag ${c}">${t}</span></div>
     <div><div class="mut">Tanggal / Jatuh tempo</div>${tgl(f.tanggal)} / ${tgl(f.jatuh_tempo)}</div><div><div class="mut">Keterangan</div>${esc(f.keterangan) || '-'}</div></div>
-    <table><tr><td>Subtotal</td><td class="r">${rp(f.subtotal)}</td></tr><tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr></table>
+    ${its.length ? `<table style="margin-bottom:10px"><tr><th>Produk</th><th class="r">Qty</th><th class="r">Harga satuan</th><th class="r">Subtotal</th></tr>${its.map(i => { const pr = produkBy(i.produk_id); return `<tr><td>${esc(produkNama(i.produk_id))}</td><td class="r">${fq(i.qty)} ${esc(pr ? pr.satuan : '')}</td><td class="r">${rp(i.harga)}</td><td class="r">${rp(i.subtotal)}</td></tr>`; }).join('')}</table>` : ''}
+    <table><tr><td>Subtotal</td><td class="r">${rp(f.subtotal)}</td></tr><tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr>${hpp > 0 ? `<tr><td class="mut">HPP (modal barang terjual)</td><td class="r mut">${rp(hpp)}</td></tr>` : ''}</table>
     <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map(j => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}`,
     `${f.terbayar === 0 ? '<button class="dan" id="del" style="margin-right:auto">Hapus faktur</button>' : ''}<button data-close>Tutup</button>${sisa > 0.005 ? `<button class="pri" id="pay">${sales ? 'Terima pembayaran' : 'Bayar'}</button>` : ''}`);
-  if ($('#del')) $('#del').onclick = () => { if (confirm('Hapus faktur ' + f.nomor + ' beserta jurnalnya?')) run(async () => { await Store.remove('Jurnal', 'ref', f.id); await Store.remove('Faktur', 'id', f.id); }, 'Faktur dihapus'); };
+  if ($('#del')) $('#del').onclick = () => { if (confirm('Hapus faktur ' + f.nomor + ' beserta jurnalnya?')) run(() => hapusFaktur(f), 'Faktur dihapus'); };
   if ($('#pay')) $('#pay').onclick = () => {
     modal((sales ? 'Terima pembayaran ' : 'Bayar ') + f.nomor, `<form id="pf" class="f">
       <div><label>Tanggal</label><input type="date" name="tanggal" value="${today()}" required></div>
@@ -311,6 +485,87 @@ function fakturDetail(id) {
       <div class="full"><label>Jumlah (sisa ${rp(sisa)})</label><input type="number" name="jumlah" min="1" max="${sisa}" step="any" value="${sisa}" required></div></form>`,
       `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`);
     $('#ok').onclick = () => { const fm = $('#pf'); if (!fm.reportValidity()) return; const v = Object.fromEntries(new FormData(fm)); run(() => payFaktur(f, { tanggal: v.tanggal, akun_kas: v.akun_kas, jumlah: num(v.jumlah) }), 'Pembayaran tersimpan'); };
+  };
+}
+
+function pPersediaan() {
+  if (!Store.invReady) return `<h2>Persediaan</h2><div class="note">Fitur persediaan membutuhkan sheet <b>Produk</b>, <b>FakturItem</b>, dan <b>Stok</b> di Spreadsheet. Perbarui <code>Code.gs</code> di Apps Script (tempel versi terbaru), jalankan <code>setup()</code> sekali, lalu <b>Deploy &rarr; Manage deployments &rarr; New version</b>. Setelah itu muat ulang halaman ini.</div>`;
+  const q = (st.q.persediaan || '').toLowerCase(), m = stokMap();
+  const all = S.Produk.map(p => ({ p, ...stokOf(p.id, m) }));
+  const rows = all.filter(r => !q || (r.p.kode + ' ' + r.p.nama).toLowerCase().includes(q)).sort((a, b) => a.p.kode.localeCompare(b.p.kode));
+  const total = Math.round(S.Stok.reduce((a, x) => a + x.nilai, 0));
+  const neraca = akunBy(AK.persediaan) ? saldo(akunBy(AK.persediaan), sums(null, null)) : 0;
+  const low = all.filter(r => r.qty <= EPS || (r.p.stok_min > 0 && r.qty <= r.p.stok_min)).length;
+  return `<h2>Persediaan</h2><p class="fin-sub">Stok dan nilai barang. Bertambah otomatis dari Pembelian dan berkurang dari Penjualan (nilai rata-rata bergerak).</p>
+  <div class="cards"><div class="card"><div class="l">Nilai persediaan</div><div class="v">${rp(total)}</div></div><div class="card"><div class="l">Jumlah produk</div><div class="v">${S.Produk.length}</div></div><div class="card"><div class="l">Stok menipis / habis</div><div class="v ${low ? 'bad' : ''}">${low}</div></div></div>
+  ${Math.abs(neraca - total) >= 1 ? `<div class="note">Nilai di Neraca (akun 1500 Persediaan, ${rp(neraca)}) berbeda ${rp(neraca - total)} dari total nilai stok. Biasanya karena jurnal manual ke akun 1500 atau transaksi sebelum fitur persediaan dipakai.</div>` : ''}
+  <div class="bar"><button class="pri" id="addp">+ Produk</button><button id="adj">Penyesuaian stok</button><span class="sp"></span><input id="q" placeholder="Cari kode / nama produk…" value="${esc(st.q.persediaan || '')}"></div>
+  <div class="panel" style="padding:0">${rows.length ? `<table><tr><th>Kode</th><th>Produk</th><th>Satuan</th><th class="r">Stok</th><th class="r">Harga rata-rata</th><th class="r">Nilai</th><th>Status</th></tr>
+  ${rows.map(r => { const habis = r.qty <= EPS, tipis = !habis && r.p.stok_min > 0 && r.qty <= r.p.stok_min; return `<tr class="rowc" data-p="${esc(r.p.id)}"><td>${esc(r.p.kode)}</td><td>${esc(r.p.nama)}</td><td>${esc(r.p.satuan)}</td><td class="r">${fq(r.qty)}</td><td class="r">${r.qty > EPS ? rp(r.avg) : '-'}</td><td class="r">${rp(r.nilai)}</td><td>${habis ? '<span class="tag bad">Habis</span>' : tipis ? '<span class="tag warn">Menipis</span>' : '<span class="tag ok">Tersedia</span>'}</td></tr>`; }).join('')}
+  <tr class="t"><td colspan="5">Total nilai persediaan</td><td class="r">${rp(rows.reduce((a, r) => a + r.nilai, 0))}</td><td></td></tr></table>`
+    : empty(S.Produk.length ? 'Produk tidak ditemukan' : 'Belum ada produk. Klik "+ Produk" untuk menambah, lalu catat saldo awal lewat "Penyesuaian stok" atau lewat Pembelian.')}</div>`;
+}
+function bindPersediaan() {
+  if (!Store.invReady) return;
+  $('#addp').onclick = () => produkForm();
+  $('#adj').onclick = () => adjForm();
+  $('#q').oninput = e => { st.q.persediaan = e.target.value; const p = e.target.selectionStart; render(); const el = $('#q'); el.focus(); el.setSelectionRange(p, p); };
+  $$('[data-p]').forEach(el => el.onclick = () => kartuStok(el.dataset.p));
+}
+function kartuStok(id) {
+  const p = produkBy(id); if (!p) return;
+  const o = stokOf(id), moves = S.Stok.filter(x => x.produk_id === id).sort((a, b) => a.tanggal.localeCompare(b.tanggal));
+  let rq_ = 0, rn = 0;
+  const jenisTag = { beli: 'Pembelian', jual: 'Penjualan', adj: 'Penyesuaian' };
+  const body = `<div class="cards" style="margin-bottom:12px"><div class="card"><div class="l">Stok</div><div class="v">${fq(o.qty)} ${esc(p.satuan)}</div></div><div class="card"><div class="l">Harga rata-rata</div><div class="v">${o.qty > EPS ? rp(o.avg) : '-'}</div></div><div class="card"><div class="l">Nilai</div><div class="v">${rp(o.nilai)}</div></div></div>
+    ${moves.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>Jenis</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Nilai</th><th class="r">Saldo qty</th><th class="r">Saldo nilai</th><th></th></tr>
+    ${moves.map(x => { rq_ = rq(rq_ + x.qty); rn += x.nilai; return `<tr><td>${tgl(x.tanggal)}</td><td>${esc(x.nomor)}<div class="mut">${esc(x.keterangan)}</div></td><td><span class="tag">${jenisTag[x.jenis] || esc(x.jenis)}</span></td><td class="r ok">${x.qty > 0 ? fq(x.qty) : ''}</td><td class="r bad">${x.qty < 0 ? fq(-x.qty) : ''}</td><td class="r">${rp(x.nilai)}</td><td class="r">${fq(rq_)}</td><td class="r">${rp(rn)}</td><td>${x.jenis === 'adj' ? `<button class="sm dan" data-dadj="${esc(x.ref)}">Hapus</button>` : ''}</td></tr>`; }).join('')}</table>` : empty('Belum ada mutasi untuk produk ini')}`;
+  modal(p.kode + ' · ' + p.nama, body,
+    `${moves.length || S.FakturItem.some(i => i.produk_id === id) ? '' : '<button class="dan" id="dp" style="margin-right:auto">Hapus produk</button>'}<button id="ep">Ubah produk</button><button id="ap">Penyesuaian stok</button><button data-close>Tutup</button>`, true);
+  $('#ep').onclick = () => produkForm(p);
+  $('#ap').onclick = () => adjForm(id);
+  if ($('#dp')) $('#dp').onclick = () => { if (confirm('Hapus produk ' + p.nama + '?')) run(() => hapusProduk(id), 'Produk dihapus'); };
+  $$('[data-dadj]').forEach(el => el.onclick = () => { if (confirm('Hapus penyesuaian stok ini beserta jurnalnya?')) run(() => hapusAdj(el.dataset.dadj), 'Penyesuaian dihapus'); });
+}
+function produkForm(p) {
+  modal(p ? 'Ubah Produk' : 'Produk Baru', `<form id="pdf" class="f">
+    <div><label>Kode</label><input name="kode" value="${esc(p ? p.kode : nextKodeProduk())}" required></div>
+    <div><label>Satuan</label><input name="satuan" value="${esc(p ? p.satuan : 'pcs')}" list="sat" required><datalist id="sat">${['pcs', 'kg', 'gram', 'liter', 'dus', 'pak', 'botol', 'lusin', 'meter'].map(x => `<option value="${x}">`).join('')}</datalist></div>
+    <div class="full"><label>Nama produk</label><input name="nama" value="${esc(p ? p.nama : '')}" required></div>
+    <div class="full"><label>Stok minimum (peringatan "Menipis" bila stok sama atau di bawah angka ini; 0 = tanpa peringatan)</label><input type="number" name="stok_min" min="0" step="any" value="${p ? p.stok_min : 0}"></div></form>`,
+    `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`);
+  $('#ok').onclick = () => {
+    const f = $('#pdf'); if (!f.reportValidity()) return;
+    const v = Object.fromEntries(new FormData(f)); v.kode = v.kode.trim(); v.nama = v.nama.trim(); v.satuan = v.satuan.trim();
+    if (S.Produk.some(x => x.kode.toLowerCase() === v.kode.toLowerCase() && (!p || x.id !== p.id))) return toast('Kode produk sudah dipakai', true);
+    const rec = { kode: v.kode, nama: v.nama, satuan: v.satuan, stok_min: num(v.stok_min) };
+    run(async () => { needInv(); if (p) await Store.update('Produk', 'id', p.id, rec); else await Store.append('Produk', [{ id: uid(), ...rec }]); }, p ? 'Produk diperbarui' : 'Produk ditambahkan');
+  };
+}
+function adjForm(produk_id) {
+  if (!S.Produk.length) return toast('Tambahkan produk terlebih dahulu', true);
+  const prods = S.Produk.slice().sort((a, b) => a.kode.localeCompare(b.kode)).map(p => [p.id, p.kode + ' · ' + p.nama]);
+  modal('Penyesuaian Stok', `<form id="af2" class="f">
+    <div><label>Tanggal</label><input type="date" name="tanggal" value="${today()}" required></div>
+    <div><label>Jenis</label><select name="jenis" id="aj"><option value="masuk">Stok masuk (saldo awal / koreksi lebih)</option><option value="keluar">Stok keluar (rusak / hilang / dipakai)</option></select></div>
+    <div class="full"><label>Produk</label>${sel('produk_id', prods, produk_id || '')}</div>
+    <div><label>Kuantitas</label><input type="number" name="qty" min="0" step="any" required></div>
+    <div id="hg"><label>Harga satuan (Rp)</label><input type="number" name="harga" min="0" step="any"></div>
+    <div class="full"><label id="lal">Akun lawan</label>${sel('akun_lawan', akunOpts(a => a.kode !== AK.persediaan && a.kategori !== 'Kas & Bank'), AK.modal, 'id="al"')}</div>
+    <div class="full"><label>Keterangan</label><input name="keterangan" placeholder="mis. saldo awal / hasil opname / barang rusak"></div>
+    <div class="full mut" id="ahint"></div></form>`,
+    `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`);
+  const upd = () => {
+    const keluar = $('#aj').value === 'keluar';
+    $('#hg').style.display = keluar ? 'none' : '';
+    $('#ahint').textContent = keluar ? 'Dinilai pada harga rata-rata saat ini, dicatat sebagai beban pada akun lawan (mis. 5600 Beban Lain-lain).'
+      : 'Saldo awal: pilih akun lawan "Modal Pemilik". Koreksi lebih dari opname: pilih "Pendapatan Lain-lain".';
+  };
+  $('#aj').onchange = () => { $('#al').value = $('#aj').value === 'keluar' ? '5600' : AK.modal; upd(); };
+  upd();
+  $('#ok').onclick = () => {
+    const f = $('#af2'); if (!f.reportValidity()) return; const v = Object.fromEntries(new FormData(f));
+    run(() => createAdj({ ...v, qty: num(v.qty), harga: num(v.harga) }), 'Penyesuaian tersimpan');
   };
 }
 
@@ -459,6 +714,7 @@ const pages = {
   kasbank: [pKasBank, bindKasBank],
   penjualan: [() => pFaktur('penjualan'), () => bindFaktur('penjualan')],
   pembelian: [() => pFaktur('pembelian'), () => bindFaktur('pembelian')],
+  persediaan: [pPersediaan, bindPersediaan],
   akun: [pAkun, bindAkun],
   jurnal: [pJurnal, bindJurnal],
   laporan: [pLaporan, bindLaporan],
