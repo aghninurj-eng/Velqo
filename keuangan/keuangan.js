@@ -41,20 +41,31 @@ const saved = (() => { try { return JSON.parse(localStorage.getItem('velqo_cfg')
 const API_URL = saved.url || CONFIG.API_URL, TOKEN = saved.token || CONFIG.TOKEN;
 let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [] };
 
+// Versi Code.gs yang diharapkan halaman ini (lihat VERSI di Code.gs). Dipakai untuk menjelaskan galat token.
+const BACKEND_VERSI = 3;
+function apiErr(j, fallback) {
+  let m = (j && j.error) || fallback;
+  if (/^Token salah/.test(m)) {
+    if (!j.v || j.v < BACKEND_VERSI) m += ' — Web App yang aktif masih memakai Code.gs lama. Di Apps Script: Deploy → Manage deployments → ikon pensil → Version: New version → Deploy (URL /exec tetap sama).';
+    else m += ' — token di Pengaturan tidak sama dengan token di Apps Script. Jalankan fungsi cekToken() di editor Apps Script untuk melihat sumber dan panjang token.';
+  }
+  return m;
+}
+
 const Store = {
   live: !!API_URL,
   invReady: true, // false bila Code.gs di Apps Script belum diperbarui (belum punya sheet Produk/Stok)
   async post(body) {
     const r = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, token: TOKEN }) });
     const j = await r.json();
-    if (!j.ok) throw new Error(j.error || 'Permintaan gagal');
+    if (!j.ok) throw new Error(apiErr(j, 'Permintaan gagal'));
     return j;
   },
   async loadAll() {
     if (this.live) {
       const r = await fetch(API_URL + (API_URL.includes('?') ? '&' : '?') + 'action=all&token=' + encodeURIComponent(TOKEN));
       const j = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Gagal memuat data');
+      if (!j.ok) throw new Error(apiErr(j, 'Gagal memuat data'));
       S = j.data;
       this.invReady = ['Produk', 'FakturItem', 'Stok'].every(k => Array.isArray(S[k]));
     } else {
@@ -703,7 +714,7 @@ function pPengaturan() {
 function bindPengaturan() {
   const get = () => Object.fromEntries(new FormData($('#cf')));
   $('#svc').onclick = () => { const v = get(); localStorage.setItem('velqo_cfg', JSON.stringify({ url: v.url.trim(), token: v.token.trim() })); location.reload(); };
-  $('#tst').onclick = async () => { const v = get(); try { const r = await fetch(v.url.trim() + '?action=all&token=' + encodeURIComponent(v.token.trim())); const j = await r.json(); j.ok ? toast('Koneksi berhasil: ' + j.data.Akun.length + ' akun terbaca') : toast(j.error, true); } catch (e) { toast('Gagal terhubung: ' + e.message, true); } };
+  $('#tst').onclick = async () => { const v = get(); try { const r = await fetch(v.url.trim() + '?action=all&token=' + encodeURIComponent(v.token.trim())); const j = await r.json(); j.ok ? toast('Koneksi berhasil: ' + j.data.Akun.length + ' akun terbaca' + (j.v >= BACKEND_VERSI ? '' : ' (Code.gs lama: fitur persediaan belum aktif)')) : toast(apiErr(j, 'Gagal'), true); } catch (e) { toast('Gagal terhubung: ' + e.message, true); } };
   if ($('#off')) $('#off').onclick = () => { localStorage.removeItem('velqo_cfg'); location.reload(); };
   if ($('#rst')) $('#rst').onclick = () => { if (confirm('Hapus semua data demo?')) { localStorage.removeItem('velqo_demo'); location.reload(); } };
 }
