@@ -27,3 +27,13 @@ Fitur persediaan menambah tiga sheet (`Produk`, `FakturItem`, `Stok`) dan satu a
 ## Data demo
 
 Mode demo menyimpan data di browser. Bila sebelumnya sudah membuka mode demo, buka **Pengaturan → Reset data demo** agar produk contoh muncul.
+
+## Jika muncul "Token salah" atau "Token belum diatur"
+
+Halaman Pengaturan kini menjelaskan penyebabnya:
+
+- **"Web App yang aktif masih memakai Code.gs lama"**: deployment belum diperbarui. Pakai Deploy → Manage deployments → ikon pensil → Version: New version → Deploy. Jangan membuat "New deployment" karena URL-nya berubah.
+- **"Token di Pengaturan tidak sama dengan token di Apps Script"**: jalankan `cekToken()` dari editor Apps Script (pilih fungsi, Run, lalu lihat Execution log). Log menampilkan versi kode, apakah token dibaca dari Script Properties atau dari kode, dan panjang token. Script Properties selalu mengalahkan baris `TOKEN` di kode.
+- **"Token belum diatur di Apps Script"**: `TOKEN` masih bernilai `GANTI_TOKEN_RAHASIA` dan Script Properties kosong.
+
+Spasi atau baris baru di awal dan akhir token diabaikan otomatis.

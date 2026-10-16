@@ -69,7 +69,8 @@ function setup() {
 
 function doGet(e) {
   try {
-    if (!authorized_(e.parameter.token)) return json_({ ok: false, error: 'Token salah' });
+    const ae = authError_(e.parameter.token);
+    if (ae) return json_({ ok: false, error: ae });
     if (e.parameter.action === 'all') {
       const data = {};
       Object.keys(SHEETS).forEach(function (n) { data[n] = read_(n); });
@@ -86,7 +87,8 @@ function doPost(e) {
   try {
     lock.waitLock(20000);
     const b = JSON.parse(e.postData.contents);
-    if (!authorized_(b.token)) return json_({ ok: false, error: 'Token salah' });
+    const ae = authError_(b.token);
+    if (ae) return json_({ ok: false, error: ae });
     if (b.action === 'multi') {
       // Beberapa sheet sekaligus dalam satu kunci, supaya faktur + item + stok + jurnal tersimpan bersama.
       const ops = b.ops || [];
@@ -107,18 +109,36 @@ function doPost(e) {
   }
 }
 
+// Naikkan angka ini setiap Code.gs diubah; halaman Keuangan memakainya untuk mendiagnosis deployment yang belum diperbarui.
+const VERSI = 3;
+
 function token_() {
   const p = PropertiesService.getScriptProperties().getProperty('TOKEN');
-  return p || TOKEN;
+  return String(p || TOKEN).trim(); // spasi/baris baru yang ikut tersalin diabaikan
 }
 
-function authorized_(t) {
+// Mengembalikan pesan galat, atau null bila token benar.
+function authError_(t) {
   const real = token_();
-  return real !== 'GANTI_TOKEN_RAHASIA' && t === real;
+  if (!real || real === 'GANTI_TOKEN_RAHASIA') return 'Token belum diatur di Apps Script (masih GANTI_TOKEN_RAHASIA)';
+  if (String(t || '').trim() !== real) return 'Token salah';
+  return null;
+}
+
+/** Diagnostik: jalankan dari editor (pilih cekToken > Run), lalu lihat Execution log. Tidak menampilkan token utuh. */
+function cekToken() {
+  const prop = PropertiesService.getScriptProperties().getProperty('TOKEN');
+  const real = token_();
+  const mask = real.length > 2 ? real.charAt(0) + '***' + real.charAt(real.length - 1) : '(terlalu pendek)';
+  Logger.log('Versi kode: ' + VERSI);
+  Logger.log('Sumber token: ' + (prop ? 'Script Properties (mengalahkan baris TOKEN di kode)' : 'baris TOKEN di kode'));
+  Logger.log('Masih bawaan GANTI_TOKEN_RAHASIA: ' + (real === 'GANTI_TOKEN_RAHASIA'));
+  Logger.log('Panjang token: ' + real.length + ', tampilan: ' + mask);
+  if (prop && prop !== prop.trim()) Logger.log('Catatan: nilai properti punya spasi di awal/akhir (sudah diabaikan otomatis).');
 }
 
 function json_(o) {
-  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(Object.assign({ v: VERSI }, o))).setMimeType(ContentService.MimeType.JSON);
 }
 
 function sheet_(name) {
