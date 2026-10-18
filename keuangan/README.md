@@ -21,6 +21,7 @@ Di form Pembelian, klik **+ Biaya** untuk menambah baris biaya (nama, jumlah, di
 - PPN 11% dihitung dari subtotal barang saja, tanpa biaya.
 - Biaya yang dibayar terpisah ke pihak lain (mis. ke kurir, bukan lewat pemasok) dicatat lewat **Kas & Bank → Kas Keluar**.
 - Rincian biaya tampil di detail faktur dan ikut terhapus bersama fakturnya.
+- Daftar rincian per baris disimpan di sheet `FakturBiaya` (Code.gs versi 4). Jika Apps Script belum diperbarui, biaya tetap tercatat benar di total faktur, stok, dan jurnal (nama biaya ada di keterangan jurnal); hanya daftar rincian di detail faktur yang belum tersedia.
 
 ## Memperbarui Apps Script (wajib setelah fitur persediaan)
 
@@ -47,3 +48,7 @@ Halaman Pengaturan kini menjelaskan penyebabnya:
 - **"Token belum diatur di Apps Script"**: `TOKEN` masih bernilai `GANTI_TOKEN_RAHASIA` dan Script Properties kosong.
 
 Spasi atau baris baru di awal dan akhir token diabaikan otomatis.
+
+## Tampilan tidak berubah setelah pembaruan
+
+Jika halaman di GitHub Pages terlihat masih versi lama setelah penggabungan, browser kemungkinan memakai cache. Tekan `Ctrl+Shift+R` (di HP: tutup tab lalu buka lagi). Setiap mengubah `keuangan.js` atau `keuangan.css`, naikkan angka `?v=` di `keuangan/index.html` agar cache otomatis diperbarui.
