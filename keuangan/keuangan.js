@@ -29,8 +29,8 @@ const DEFAULT_COA = [
   ['5400','Beban Listrik, Air & Internet','Beban','Beban Operasional'],['5500','Beban Perlengkapan','Beban','Beban Operasional'],['5600','Beban Lain-lain','Beban','Beban Lain']
 ].map(([kode, nama, tipe, kategori]) => ({ kode, nama, tipe, kategori }));
 const AK = { piutang: '1300', ppnMasuk: '1400', persediaan: '1500', hutang: '2100', ppnKeluar: '2200', penjualan: '4100', pembelian: '5100', modal: '3100' };
-const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'], Produk: ['stok_min'], FakturItem: ['qty', 'harga', 'subtotal'], Stok: ['qty', 'harga', 'nilai'] };
-const SHEET_NAMES = ['Akun', 'Jurnal', 'Faktur', 'KasBank', 'Produk', 'FakturItem', 'Stok'];
+const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'], Produk: ['stok_min'], FakturItem: ['qty', 'harga', 'subtotal'], Stok: ['qty', 'harga', 'nilai'], FakturBiaya: ['jumlah'] };
+const SHEET_NAMES = ['Akun', 'Jurnal', 'Faktur', 'KasBank', 'Produk', 'FakturItem', 'Stok', 'FakturBiaya'];
 const EPS = 0.00005;
 const rq = n => Math.round(num(n) * 10000) / 10000; // kuantitas dibulatkan 4 desimal agar tidak ada sisa pecahan
 const fq = n => rq(n).toLocaleString('id-ID', { maximumFractionDigits: 4 });
@@ -39,28 +39,41 @@ const DEBIT_NORMAL = { Aset: true, Beban: true };
 
 const saved = (() => { try { return JSON.parse(localStorage.getItem('velqo_cfg') || '{}'); } catch { return {}; } })();
 const API_URL = saved.url || CONFIG.API_URL, TOKEN = saved.token || CONFIG.TOKEN;
-let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [] };
+let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [] };
+
+// Versi Code.gs yang diharapkan halaman ini (lihat VERSI di Code.gs). Dipakai untuk menjelaskan galat token.
+const BACKEND_VERSI = 4;
+function apiErr(j, fallback) {
+  let m = (j && j.error) || fallback;
+  if (/^Token salah/.test(m)) {
+    if (!j.v || j.v < BACKEND_VERSI) m += ' — Web App yang aktif masih memakai Code.gs lama. Di Apps Script: Deploy → Manage deployments → ikon pensil → Version: New version → Deploy (URL /exec tetap sama).';
+    else m += ' — token di Pengaturan tidak sama dengan token di Apps Script. Jalankan fungsi cekToken() di editor Apps Script untuk melihat sumber dan panjang token.';
+  }
+  return m;
+}
 
 const Store = {
   live: !!API_URL,
   invReady: true, // false bila Code.gs di Apps Script belum diperbarui (belum punya sheet Produk/Stok)
+  biayaReady: true, // false bila belum punya sheet FakturBiaya (Code.gs versi 4)
   async post(body) {
     const r = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, token: TOKEN }) });
     const j = await r.json();
-    if (!j.ok) throw new Error(j.error || 'Permintaan gagal');
+    if (!j.ok) throw new Error(apiErr(j, 'Permintaan gagal'));
     return j;
   },
   async loadAll() {
     if (this.live) {
       const r = await fetch(API_URL + (API_URL.includes('?') ? '&' : '?') + 'action=all&token=' + encodeURIComponent(TOKEN));
       const j = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Gagal memuat data');
+      if (!j.ok) throw new Error(apiErr(j, 'Gagal memuat data'));
       S = j.data;
       this.invReady = ['Produk', 'FakturItem', 'Stok'].every(k => Array.isArray(S[k]));
+      this.biayaReady = Array.isArray(S.FakturBiaya);
     } else {
       const raw = localStorage.getItem('velqo_demo');
       if (raw) S = JSON.parse(raw);
-      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [] }; await seedDemo(); }
+      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [] }; await seedDemo(); }
     }
     for (const k of SHEET_NAMES) S[k] = S[k] || [];
     for (const k in NUMF) S[k].forEach(r => NUMF[k].forEach(f => r[f] = num(r[f])));
@@ -189,9 +202,23 @@ const labaRugi = (from, to) => {
 /* Faktur. Jika `items` ([{produk_id, qty, harga}]) diisi:
    - pembelian: subtotal = total item, jurnal Dr 1500 Persediaan, stok masuk sebesar nilai pembelian (PPN tidak dikapitalisasi);
    - penjualan: subtotal = total harga jual, stok keluar pada harga rata-rata, jurnal tambahan Dr 5100 HPP / Cr 1500.
-   Tanpa items, perilaku sama seperti sebelumnya (akun dan subtotal manual). */
-async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items }) {
+   Tanpa items, perilaku sama seperti sebelumnya (akun dan subtotal manual).
+   `biaya` ([{nama, jumlah, akun}], hanya pembelian): ongkir, admin, dll. yang ikut ditagihkan di faktur (menambah hutang).
+   akun 'stok' = ditambahkan ke nilai barang (dibagi proporsional ke tiap produk, atau ke akun faktur bila tanpa produk);
+   kode akun beban = dicatat sebagai beban. PPN dihitung dari subtotal barang saja. */
+async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items, biaya }) {
   const sales = jenis === 'penjualan';
+  biaya = (biaya || []).filter(b => String(b.nama || '').trim() || num(b.jumlah)).map(b => ({ nama: String(b.nama || '').trim(), jumlah: Math.round(num(b.jumlah)), akun: String(b.akun || 'stok') }));
+  if (biaya.length) {
+    if (sales) throw new Error('Biaya tambahan hanya untuk faktur pembelian');
+    if (!Store.biayaReady) throw new Error('Fitur biaya tambahan belum aktif di Spreadsheet. Perbarui Code.gs di Apps Script (versi 4), jalankan setup(), lalu deploy versi baru.');
+    biaya.forEach(b => {
+      if (!b.nama) throw new Error('Nama biaya wajib diisi');
+      if (b.jumlah <= 0) throw new Error('Jumlah biaya ' + b.nama + ' harus lebih dari nol');
+      if (b.akun !== 'stok' && !(akunBy(b.akun) && akunBy(b.akun).tipe === 'Beban')) throw new Error('Akun beban untuk biaya ' + b.nama + ' tidak valid');
+    });
+  }
+  const capTotal = biaya.filter(b => b.akun === 'stok').reduce((a, b) => a + b.jumlah, 0);
   items = (items || []).filter(i => i.produk_id && num(i.qty) > 0).map(i => ({ produk_id: i.produk_id, qty: rq(i.qty), harga: num(i.harga) }));
   const useItems = items.length > 0;
   let itemRows = [], stokRows = [], cogs = 0;
@@ -212,16 +239,28 @@ async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, ak
         o.qty = rq(o.qty - r.qty); o.nilai -= nilai; cogs += nilai;
       }
     } else {
-      stokRows = itemRows.map(r => ({ id: uid(), tanggal, nomor, produk_id: r.produk_id, jenis: 'beli', qty: r.qty, harga: r.harga, nilai: r.subtotal, keterangan: 'Pembelian dari ' + pihak, ref: id }));
+      // Biaya yang ikut nilai barang dibagi proporsional ke nilai tiap baris (atau qty bila nilainya nol); sisa pembulatan ke baris terakhir.
+      const W = itemRows.reduce((a, r) => a + (subtotal > 0 ? r.subtotal : r.qty), 0);
+      let left = capTotal;
+      stokRows = itemRows.map((r, i) => {
+        const share = i === itemRows.length - 1 ? left : Math.round(capTotal * (subtotal > 0 ? r.subtotal : r.qty) / W);
+        left -= share;
+        const nilai = r.subtotal + share;
+        return { id: uid(), tanggal, nomor, produk_id: r.produk_id, jenis: 'beli', qty: r.qty, harga: capTotal ? Math.round(nilai / r.qty * 100) / 100 : r.harga, nilai, keterangan: 'Pembelian dari ' + pihak, ref: id };
+      });
     }
   }
-  const ppnAmt = ppn ? Math.round(subtotal * 0.11) : 0, total = subtotal + ppnAmt;
+  const biayaTotal = biaya.reduce((a, b) => a + b.jumlah, 0);
+  const ppnAmt = ppn ? Math.round(subtotal * 0.11) : 0, total = subtotal + biayaTotal + ppnAmt;
   const f = { id, jenis, nomor, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn: ppnAmt, total, terbayar: 0 };
+  const biayaRows = biaya.map(b => ({ id: uid(), faktur_id: id, nama: b.nama, jumlah: b.jumlah, akun: b.akun === 'stok' ? akun : b.akun }));
+  const biayaBeban = {};
+  biaya.filter(b => b.akun !== 'stok').forEach(b => { biayaBeban[b.akun] = (biayaBeban[b.akun] || 0) + b.jumlah; });
   const lines = sales
     ? [{ kode: AK.piutang, debit: total }, { kode: akun, kredit: subtotal }, { kode: AK.ppnKeluar, kredit: ppnAmt }, { kode: AK.pembelian, debit: cogs }, { kode: AK.persediaan, kredit: cogs }]
-    : [{ kode: akun, debit: subtotal }, { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
+    : [{ kode: akun, debit: subtotal + capTotal }, ...Object.entries(biayaBeban).map(([kode, debit]) => ({ kode, debit })), { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
   const jr = jurnalRows({ tanggal, nomor, keterangan: (sales ? 'Penjualan ke ' : 'Pembelian dari ') + pihak + (keterangan ? ' - ' + keterangan : ''), sumber: sales ? 'INV' : 'BILL', ref: id, lines });
-  await Store.appendMany({ Faktur: [f], FakturItem: itemRows, Stok: stokRows, Jurnal: jr });
+  await Store.appendMany({ Faktur: [f], FakturItem: itemRows, FakturBiaya: biayaRows, Stok: stokRows, Jurnal: jr });
   return f;
 }
 async function hapusFaktur(f) {
@@ -229,6 +268,7 @@ async function hapusFaktur(f) {
   cekStokSetelahHapus(f.id);
   await Store.remove('Jurnal', 'ref', f.id);
   if (Store.invReady) { await Store.remove('FakturItem', 'faktur_id', f.id); await Store.remove('Stok', 'ref', f.id); }
+  if (Store.biayaReady && S.FakturBiaya.some(b => b.faktur_id === f.id)) await Store.remove('FakturBiaya', 'faktur_id', f.id);
   await Store.remove('Faktur', 'id', f.id);
 }
 async function payFaktur(f, { tanggal, akun_kas, jumlah }) {
@@ -275,13 +315,13 @@ async function seedDemo() {
     [2, 12, 'jual', 'Toko Maju Jaya', [[A, 150, 55000], [C, 60, 140000]]],
     [1, 8, 'jual', 'PT Bintang Mulia', [[A, 100, 55000], [B, 20, 85000], [C, 30, 140000]]],
     [0, 2, 'jual', 'CV Sinar Terang', [[A, 10, 55000], [C, 10, 140000]]],
-    [0, 3, 'beli', 'Supplier Bahan', [[B, 100, 52000], [C, 40, 87000]]]
+    [0, 3, 'beli', 'Supplier Bahan', [[B, 100, 52000], [C, 40, 87000]], [{ nama: 'Ongkir', jumlah: 200000, akun: 'stok' }, { nama: 'Biaya admin', jumlah: 15000, akun: '5600' }]]
   ];
-  for (const [m, day, jenis, pihak, rows] of events) {
+  for (const [m, day, jenis, pihak, rows, biaya] of events) {
     const f = await createFaktur({
       jenis: jenis === 'jual' ? 'penjualan' : 'pembelian', tanggal: d(m, day), jatuh_tempo: d(m, day + 14 > 28 ? 28 : day + 14), pihak,
       keterangan: jenis === 'jual' ? 'Penjualan produk' : 'Pembelian persediaan', ppn: false,
-      items: rows.map(([produk_id, qty, harga]) => ({ produk_id, qty, harga }))
+      items: rows.map(([produk_id, qty, harga]) => ({ produk_id, qty, harga })), biaya
     });
     if (jenis === 'jual' && m >= 1) await payFaktur(f, { tanggal: d(m, Math.min(day + 10, 28)), akun_kas: '1200', jumlah: f.total });
   }
@@ -401,11 +441,17 @@ function fakturForm(jenis) {
   const sales = jenis === 'penjualan';
   const due = new Date(); due.setDate(due.getDate() + 14);
   const canInv = Store.invReady, hasProd = canInv && S.Produk.length > 0;
+  const showBiaya = !sales && Store.biayaReady;
+  const biayaOpts = [['stok', 'Tambah ke nilai barang'], ...akunOpts(a => a.tipe === 'Beban' && a.kode !== AK.pembelian).map(([k, t]) => [k, 'Beban: ' + t])];
+  const biayaRow = () => `<tr><td data-l="Nama biaya"><input name="bnama" list="bnm" placeholder="mis. Ongkir"></td>
+    <td data-l="Jumlah"><input type="number" name="bjumlah" min="0" step="any" class="r" placeholder="0"></td>
+    <td data-l="Dicatat sebagai">${sel('bakun', biayaOpts, 'stok')}</td>
+    <td><button type="button" class="sm" data-rmb aria-label="Hapus biaya">×</button></td></tr>`;
   const prodOpts = [['', '— pilih produk —'], ...S.Produk.slice().sort((x, y) => x.kode.localeCompare(y.kode)).map(p => [p.id, p.kode + ' · ' + p.nama + ' (' + p.satuan + ')'])];
-  const row = () => `<tr><td>${sel('produk_id', prodOpts, '')}<div class="mut stk"></div></td>
-    <td><input type="number" name="qty" min="0" step="any" class="r" placeholder="0"></td>
-    <td><input type="number" name="harga" min="0" step="any" class="r" placeholder="0"></td>
-    <td class="r sub">Rp 0</td><td><button type="button" class="sm" data-rm aria-label="Hapus baris">×</button></td></tr>`;
+  const row = () => `<tr><td data-l="Produk">${sel('produk_id', prodOpts, '')}<div class="mut stk"></div></td>
+    <td data-l="Qty"><input type="number" name="qty" min="0" step="any" class="r" placeholder="0"></td>
+    <td data-l="Harga satuan"><input type="number" name="harga" min="0" step="any" class="r" placeholder="0"></td>
+    <td class="r sub" data-l="Subtotal">Rp 0</td><td><button type="button" class="sm" data-rm aria-label="Hapus baris">×</button></td></tr>`;
   modal('Faktur ' + (sales ? 'Penjualan' : 'Pembelian'), `<form id="ff" class="f">
     <div><label>Tanggal</label><input type="date" name="tanggal" value="${today()}" required></div>
     <div><label>Jatuh tempo</label><input type="date" name="jatuh_tempo" value="${ymd(due)}" required></div>
@@ -415,7 +461,7 @@ function fakturForm(jenis) {
       <option value="items" ${hasProd ? 'selected' : ''}>Barang persediaan (${sales ? 'stok berkurang, HPP otomatis' : 'stok bertambah'})</option>
       <option value="manual" ${hasProd ? '' : 'selected'}>Tanpa produk (jasa / lainnya)</option></select></div>` : `<div class="full note">Rincian barang belum aktif karena Code.gs di Apps Script belum diperbarui. Faktur tetap bisa dibuat dengan subtotal manual.</div><input type="hidden" name="mode" id="mode" value="manual">`}
     <div class="full" id="blkItems">
-      ${hasProd ? `<table class="itm"><tr><th>Produk</th><th class="r" style="width:90px">Qty</th><th class="r" style="width:130px">Harga satuan</th><th class="r" style="width:120px">Subtotal</th><th style="width:34px"></th></tr>${row()}${row()}</table>
+      ${hasProd ? `<table class="itm"><tr class="hd"><th>Produk</th><th class="r" style="width:90px">Qty</th><th class="r" style="width:130px">Harga satuan</th><th class="r" style="width:120px">Subtotal</th><th style="width:34px"></th></tr>${row()}${row()}</table>
       <div class="bar" style="margin-top:8px"><button type="button" id="addrow">+ Baris</button></div>`
         : `<div class="note">Belum ada produk. Tambahkan dulu di tab <a href="#persediaan" data-close>Persediaan</a>, atau pilih "Tanpa produk".</div>`}
     </div>
@@ -423,10 +469,17 @@ function fakturForm(jenis) {
       <div class="full"><label>${sales ? 'Akun pendapatan' : 'Akun pembelian / beban'}</label>${sel('akun', akunOpts(a => sales ? a.tipe === 'Pendapatan' : a.tipe === 'Beban' || a.kategori === 'Persediaan'), sales ? AK.penjualan : AK.pembelian)}</div>
       <div><label>Subtotal (Rp)</label><input type="number" name="subtotal" min="0" step="any"></div>
     </div>
-    <div class="chk full"><input type="checkbox" name="ppn" id="ppn"><label for="ppn">Kenakan PPN 11%</label></div>
+    ${showBiaya ? `<div class="full" id="blkBiaya">
+      <label>Biaya tambahan (ongkir, admin, dll.)</label>
+      <datalist id="bnm">${['Ongkir', 'Biaya admin', 'Asuransi', 'Bongkar muat', 'Biaya lain'].map(x => `<option value="${x}">`).join('')}</datalist>
+      <table class="bia" id="tbBiaya" style="display:none"><tr class="hd"><th>Nama biaya</th><th class="r" style="width:130px">Jumlah</th><th style="width:250px">Dicatat sebagai</th><th style="width:34px"></th></tr></table>
+      <div class="bar" style="margin-top:8px"><button type="button" id="addbiaya">+ Biaya</button><span class="mut">Ditagihkan di faktur ini (menambah hutang). Ongkir biasanya ditambah ke nilai barang, biaya admin dicatat sebagai beban.</span></div>
+    </div>` : (!sales ? `<div class="full note">Kolom biaya tambahan belum aktif karena Code.gs di Apps Script belum diperbarui ke versi 4.</div>` : '')}
+    <div class="chk full"><input type="checkbox" name="ppn" id="ppn"><label for="ppn">Kenakan PPN 11%${sales ? '' : ' (dihitung dari subtotal barang, tanpa biaya)'}</label></div>
     <div class="full mut" id="tot"></div></form>`,
     `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`, true);
   const items = () => $$('#ff .itm tr').slice(1).map(tr => ({ tr, produk_id: $('[name=produk_id]', tr).value, qty: num($('[name=qty]', tr).value), harga: num($('[name=harga]', tr).value) }));
+  const biayaRows = () => $$('#ff .bia tr').slice(1).map(tr => ({ tr, nama: $('[name=bnama]', tr).value.trim(), jumlah: num($('[name=bjumlah]', tr).value), akun: $('[name=bakun]', tr).value }));
   const upd = () => {
     const f = $('#ff'), manual = f.elements.mode.value === 'manual';
     $('#blkItems').style.display = manual ? 'none' : ''; $('#blkManual').style.display = manual ? '' : 'none';
@@ -443,17 +496,26 @@ function fakturForm(jenis) {
         el.classList.toggle('bad', sales && qty > o.qty + EPS);
       });
     }
+    const bt = biayaRows().reduce((a, r) => a + r.jumlah, 0);
     const pp = f.elements.ppn.checked ? Math.round(sub * .11) : 0;
-    $('#tot').textContent = 'Total: ' + rp(sub + pp) + (pp ? ' (PPN ' + rp(pp) + ')' : '');
+    const parts = [bt || pp ? 'barang ' + rp(sub) : '', bt ? 'biaya ' + rp(bt) : '', pp ? 'PPN ' + rp(pp) : ''].filter(Boolean);
+    $('#tot').textContent = 'Total: ' + rp(sub + bt + pp) + (parts.length > 1 ? ' (' + parts.join(' + ') + ')' : '');
   };
   $('#ff').oninput = upd; $('#ff').onchange = upd; upd();
   if ($('#addrow')) $('#addrow').onclick = () => { $('#ff .itm').insertAdjacentHTML('beforeend', row()); };
-  $('#ff').onclick = e => { if (e.target.dataset.rm !== undefined && $$('#ff .itm tr').length > 2) { e.target.closest('tr').remove(); upd(); } };
+  if ($('#addbiaya')) $('#addbiaya').onclick = () => { $('#tbBiaya').style.display = ''; $('#tbBiaya').insertAdjacentHTML('beforeend', biayaRow()); upd(); };
+  $('#ff').onclick = e => {
+    if (e.target.dataset.rm !== undefined && $$('#ff .itm tr').length > 2) { e.target.closest('tr').remove(); upd(); }
+    if (e.target.dataset.rmb !== undefined) { e.target.closest('tr').remove(); if (!$$('#ff .bia tr')[1]) $('#tbBiaya').style.display = 'none'; upd(); }
+  };
   $$('#blkItems a[data-close]').forEach(a => a.onclick = () => dlg.close());
   $('#ok').onclick = () => {
     const f = $('#ff'); if (!f.reportValidity()) return;
     const v = Object.fromEntries(new FormData(f)), manual = v.mode === 'manual';
     const base = { jenis, tanggal: v.tanggal, jatuh_tempo: v.jatuh_tempo, pihak: v.pihak.trim(), keterangan: v.keterangan.trim(), ppn: !!v.ppn };
+    const biaya = biayaRows().filter(r => r.nama || r.jumlah);
+    if (biaya.some(r => !r.nama || r.jumlah <= 0)) return toast('Lengkapi nama dan jumlah di setiap baris biaya', true);
+    if (biaya.length) base.biaya = biaya.map(r => ({ nama: r.nama, jumlah: r.jumlah, akun: r.akun }));
     if (manual) {
       if (num(v.subtotal) <= 0) return toast('Subtotal wajib diisi', true);
       return run(() => createFaktur({ ...base, akun: v.akun, subtotal: num(v.subtotal) }), 'Faktur tersimpan');
@@ -469,12 +531,14 @@ function fakturDetail(id) {
   const sales = f.jenis === 'penjualan', sisa = f.total - f.terbayar, [t, c] = fakturStatus(f);
   const pays = S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY') && ![AK.piutang, AK.hutang].includes(j.kode_akun));
   const its = S.FakturItem.filter(i => i.faktur_id === f.id);
+  const bys = S.FakturBiaya.filter(b => b.faktur_id === f.id), biayaSum = bys.reduce((a, b) => a + b.jumlah, 0);
   const hpp = -S.Stok.filter(x => x.ref === f.id && x.jenis === 'jual').reduce((a, x) => a + x.nilai, 0);
   modal(f.nomor, `<div class="f" style="margin-bottom:12px">
     <div><div class="mut">${sales ? 'Pelanggan' : 'Pemasok'}</div>${esc(f.pihak)}</div><div><div class="mut">Status</div><span class="tag ${c}">${t}</span></div>
     <div><div class="mut">Tanggal / Jatuh tempo</div>${tgl(f.tanggal)} / ${tgl(f.jatuh_tempo)}</div><div><div class="mut">Keterangan</div>${esc(f.keterangan) || '-'}</div></div>
     ${its.length ? `<table style="margin-bottom:10px"><tr><th>Produk</th><th class="r">Qty</th><th class="r">Harga satuan</th><th class="r">Subtotal</th></tr>${its.map(i => { const pr = produkBy(i.produk_id); return `<tr><td>${esc(produkNama(i.produk_id))}</td><td class="r">${fq(i.qty)} ${esc(pr ? pr.satuan : '')}</td><td class="r">${rp(i.harga)}</td><td class="r">${rp(i.subtotal)}</td></tr>`; }).join('')}</table>` : ''}
-    <table><tr><td>Subtotal</td><td class="r">${rp(f.subtotal)}</td></tr><tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr>${hpp > 0 ? `<tr><td class="mut">HPP (modal barang terjual)</td><td class="r mut">${rp(hpp)}</td></tr>` : ''}</table>
+    ${bys.length ? `<table style="margin-bottom:10px"><tr><th>Biaya tambahan</th><th>Dicatat sebagai</th><th class="r">Jumlah</th></tr>${bys.map(b => `<tr><td>${esc(b.nama)}</td><td class="mut">${b.akun === AK.persediaan ? 'Nilai persediaan' : esc(akunNama(b.akun))}</td><td class="r">${rp(b.jumlah)}</td></tr>`).join('')}</table>` : ''}
+    <table><tr><td>Subtotal${biayaSum ? ' barang' : ''}</td><td class="r">${rp(f.subtotal)}</td></tr>${biayaSum ? `<tr><td>Biaya tambahan</td><td class="r">${rp(biayaSum)}</td></tr>` : ''}<tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr>${hpp > 0 ? `<tr><td class="mut">HPP (modal barang terjual)</td><td class="r mut">${rp(hpp)}</td></tr>` : ''}</table>
     <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map(j => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}`,
     `${f.terbayar === 0 ? '<button class="dan" id="del" style="margin-right:auto">Hapus faktur</button>' : ''}<button data-close>Tutup</button>${sisa > 0.005 ? `<button class="pri" id="pay">${sales ? 'Terima pembayaran' : 'Bayar'}</button>` : ''}`);
   if ($('#del')) $('#del').onclick = () => { if (confirm('Hapus faktur ' + f.nomor + ' beserta jurnalnya?')) run(() => hapusFaktur(f), 'Faktur dihapus'); };
@@ -703,7 +767,7 @@ function pPengaturan() {
 function bindPengaturan() {
   const get = () => Object.fromEntries(new FormData($('#cf')));
   $('#svc').onclick = () => { const v = get(); localStorage.setItem('velqo_cfg', JSON.stringify({ url: v.url.trim(), token: v.token.trim() })); location.reload(); };
-  $('#tst').onclick = async () => { const v = get(); try { const r = await fetch(v.url.trim() + '?action=all&token=' + encodeURIComponent(v.token.trim())); const j = await r.json(); j.ok ? toast('Koneksi berhasil: ' + j.data.Akun.length + ' akun terbaca') : toast(j.error, true); } catch (e) { toast('Gagal terhubung: ' + e.message, true); } };
+  $('#tst').onclick = async () => { const v = get(); try { const r = await fetch(v.url.trim() + '?action=all&token=' + encodeURIComponent(v.token.trim())); const j = await r.json(); j.ok ? toast('Koneksi berhasil: ' + j.data.Akun.length + ' akun terbaca' + (j.v >= BACKEND_VERSI ? '' : ' (Code.gs lama: perbarui agar fitur terbaru aktif)')) : toast(apiErr(j, 'Gagal'), true); } catch (e) { toast('Gagal terhubung: ' + e.message, true); } };
   if ($('#off')) $('#off').onclick = () => { localStorage.removeItem('velqo_cfg'); location.reload(); };
   if ($('#rst')) $('#rst').onclick = () => { if (confirm('Hapus semua data demo?')) { localStorage.removeItem('velqo_demo'); location.reload(); } };
 }
