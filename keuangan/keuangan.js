@@ -116,7 +116,7 @@ function jurnalRows({ tanggal, nomor, keterangan, sumber, ref, lines }) {
   const d = lines.reduce((a, l) => a + num(l.debit), 0), k = lines.reduce((a, l) => a + num(l.kredit), 0);
   if (Math.abs(d - k) > 0.005) throw new Error('Jurnal tidak seimbang');
   const rows = lines.filter(l => num(l.debit) || num(l.kredit)).map(l => ({
-    id: uid(), tanggal, nomor, keterangan: keterangan || '', kode_akun: String(l.kode),
+    id: uid(), tanggal, nomor, keterangan: l.ket || keterangan || '', kode_akun: String(l.kode),
     debit: num(l.debit), kredit: num(l.kredit), sumber, ref: ref || ''
   }));
   if (!rows.length) throw new Error('Jumlah tidak boleh nol');
@@ -211,7 +211,6 @@ async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, ak
   biaya = (biaya || []).filter(b => String(b.nama || '').trim() || num(b.jumlah)).map(b => ({ nama: String(b.nama || '').trim(), jumlah: Math.round(num(b.jumlah)), akun: String(b.akun || 'stok') }));
   if (biaya.length) {
     if (sales) throw new Error('Biaya tambahan hanya untuk faktur pembelian');
-    if (!Store.biayaReady) throw new Error('Fitur biaya tambahan belum aktif di Spreadsheet. Perbarui Code.gs di Apps Script (versi 4), jalankan setup(), lalu deploy versi baru.');
     biaya.forEach(b => {
       if (!b.nama) throw new Error('Nama biaya wajib diisi');
       if (b.jumlah <= 0) throw new Error('Jumlah biaya ' + b.nama + ' harus lebih dari nol');
@@ -254,13 +253,13 @@ async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, ak
   const ppnAmt = ppn ? Math.round(subtotal * 0.11) : 0, total = subtotal + biayaTotal + ppnAmt;
   const f = { id, jenis, nomor, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn: ppnAmt, total, terbayar: 0 };
   const biayaRows = biaya.map(b => ({ id: uid(), faktur_id: id, nama: b.nama, jumlah: b.jumlah, akun: b.akun === 'stok' ? akun : b.akun }));
-  const biayaBeban = {};
-  biaya.filter(b => b.akun !== 'stok').forEach(b => { biayaBeban[b.akun] = (biayaBeban[b.akun] || 0) + b.jumlah; });
+  const biayaLines = biaya.filter(b => b.akun !== 'stok').map(b => ({ kode: b.akun, debit: b.jumlah, ket: 'Biaya ' + b.nama + ' - ' + pihak }));
+  const capLine = capTotal ? [{ kode: akun, debit: capTotal, ket: 'Biaya ke nilai barang: ' + biaya.filter(b => b.akun === 'stok').map(b => b.nama).join(', ') + ' - ' + pihak }] : [];
   const lines = sales
     ? [{ kode: AK.piutang, debit: total }, { kode: akun, kredit: subtotal }, { kode: AK.ppnKeluar, kredit: ppnAmt }, { kode: AK.pembelian, debit: cogs }, { kode: AK.persediaan, kredit: cogs }]
-    : [{ kode: akun, debit: subtotal + capTotal }, ...Object.entries(biayaBeban).map(([kode, debit]) => ({ kode, debit })), { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
+    : [{ kode: akun, debit: subtotal }, ...capLine, ...biayaLines, { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
   const jr = jurnalRows({ tanggal, nomor, keterangan: (sales ? 'Penjualan ke ' : 'Pembelian dari ') + pihak + (keterangan ? ' - ' + keterangan : ''), sumber: sales ? 'INV' : 'BILL', ref: id, lines });
-  await Store.appendMany({ Faktur: [f], FakturItem: itemRows, FakturBiaya: biayaRows, Stok: stokRows, Jurnal: jr });
+  await Store.appendMany({ Faktur: [f], FakturItem: itemRows, FakturBiaya: Store.biayaReady ? biayaRows : [], Stok: stokRows, Jurnal: jr });
   return f;
 }
 async function hapusFaktur(f) {
@@ -441,7 +440,7 @@ function fakturForm(jenis) {
   const sales = jenis === 'penjualan';
   const due = new Date(); due.setDate(due.getDate() + 14);
   const canInv = Store.invReady, hasProd = canInv && S.Produk.length > 0;
-  const showBiaya = !sales && Store.biayaReady;
+  const showBiaya = !sales;
   const biayaOpts = [['stok', 'Tambah ke nilai barang'], ...akunOpts(a => a.tipe === 'Beban' && a.kode !== AK.pembelian).map(([k, t]) => [k, 'Beban: ' + t])];
   const biayaRow = () => `<tr><td data-l="Nama biaya"><input name="bnama" list="bnm" placeholder="mis. Ongkir"></td>
     <td data-l="Jumlah"><input type="number" name="bjumlah" min="0" step="any" class="r" placeholder="0"></td>
@@ -474,7 +473,8 @@ function fakturForm(jenis) {
       <datalist id="bnm">${['Ongkir', 'Biaya admin', 'Asuransi', 'Bongkar muat', 'Biaya lain'].map(x => `<option value="${x}">`).join('')}</datalist>
       <table class="bia" id="tbBiaya" style="display:none"><tr class="hd"><th>Nama biaya</th><th class="r" style="width:130px">Jumlah</th><th style="width:250px">Dicatat sebagai</th><th style="width:34px"></th></tr></table>
       <div class="bar" style="margin-top:8px"><button type="button" id="addbiaya">+ Biaya</button><span class="mut">Ditagihkan di faktur ini (menambah hutang). Ongkir biasanya ditambah ke nilai barang, biaya admin dicatat sebagai beban.</span></div>
-    </div>` : (!sales ? `<div class="full note">Kolom biaya tambahan belum aktif karena Code.gs di Apps Script belum diperbarui ke versi 4.</div>` : '')}
+      ${Store.biayaReady ? '' : '<div class="mut" style="margin-top:6px">Daftar rincian per baris belum bisa disimpan di Spreadsheet (Code.gs belum versi 4). Total, stok, dan jurnal tetap tercatat benar.</div>'}
+    </div>` : ''}
     <div class="chk full"><input type="checkbox" name="ppn" id="ppn"><label for="ppn">Kenakan PPN 11%${sales ? '' : ' (dihitung dari subtotal barang, tanpa biaya)'}</label></div>
     <div class="full mut" id="tot"></div></form>`,
     `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`, true);
@@ -531,7 +531,7 @@ function fakturDetail(id) {
   const sales = f.jenis === 'penjualan', sisa = f.total - f.terbayar, [t, c] = fakturStatus(f);
   const pays = S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY') && ![AK.piutang, AK.hutang].includes(j.kode_akun));
   const its = S.FakturItem.filter(i => i.faktur_id === f.id);
-  const bys = S.FakturBiaya.filter(b => b.faktur_id === f.id), biayaSum = bys.reduce((a, b) => a + b.jumlah, 0);
+  const bys = S.FakturBiaya.filter(b => b.faktur_id === f.id), biayaSum = bys.length ? bys.reduce((a, b) => a + b.jumlah, 0) : Math.max(0, f.total - f.subtotal - f.ppn);
   const hpp = -S.Stok.filter(x => x.ref === f.id && x.jenis === 'jual').reduce((a, x) => a + x.nilai, 0);
   modal(f.nomor, `<div class="f" style="margin-bottom:12px">
     <div><div class="mut">${sales ? 'Pelanggan' : 'Pemasok'}</div>${esc(f.pihak)}</div><div><div class="mut">Status</div><span class="tag ${c}">${t}</span></div>
