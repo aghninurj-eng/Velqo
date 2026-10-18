@@ -18,6 +18,8 @@ const SHEETS = {
   // Persediaan: master produk, rincian barang per faktur, dan buku mutasi stok (qty/nilai bertanda: masuk +, keluar -).
   Produk:    ['id', 'kode', 'nama', 'satuan', 'stok_min'],
   FakturItem:['id', 'faktur_id', 'produk_id', 'qty', 'harga', 'subtotal'],
+  // Biaya tambahan faktur pembelian (ongkir, admin, dll). akun = 1500 bila ditambahkan ke nilai persediaan, atau kode akun beban.
+  FakturBiaya:['id', 'faktur_id', 'nama', 'jumlah', 'akun'],
   Stok:      ['id', 'tanggal', 'nomor', 'produk_id', 'jenis', 'qty', 'harga', 'nilai', 'keterangan', 'ref'],
 };
 const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah', 'qty', 'harga', 'nilai', 'stok_min'];
@@ -110,7 +112,7 @@ function doPost(e) {
 }
 
 // Naikkan angka ini setiap Code.gs diubah; halaman Keuangan memakainya untuk mendiagnosis deployment yang belum diperbarui.
-const VERSI = 3;
+const VERSI = 4;
 
 function token_() {
   const p = PropertiesService.getScriptProperties().getProperty('TOKEN');

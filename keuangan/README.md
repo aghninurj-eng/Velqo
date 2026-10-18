@@ -12,9 +12,19 @@ Halaman keuangan (Ringkasan, Kas & Bank, Penjualan, Pembelian, Persediaan, Dafta
 - Faktur atau penyesuaian yang barangnya sudah terpakai transaksi lain tidak bisa dihapus (stok akan minus).
 - Pilihan "Tanpa produk" tetap tersedia untuk jasa dan transaksi lain.
 
+## Biaya tambahan pembelian (ongkir, admin, dll.)
+
+Di form Pembelian, klik **+ Biaya** untuk menambah baris biaya (nama, jumlah, dicatat sebagai). Biaya ditagihkan di faktur yang sama, jadi menambah total dan hutang ke pemasok.
+
+- **Tambah ke nilai barang** (cocok untuk ongkir, asuransi, bongkar muat): ikut nilai persediaan, dibagi proporsional ke nilai tiap produk di faktur itu, sehingga harga rata-rata produk sudah memuat biaya angkut. Jurnal `Dr 1500 Persediaan`. Pada faktur "Tanpa produk", biaya ini ditambahkan ke akun faktur.
+- **Beban: (pilih akun)** (cocok untuk biaya admin): dicatat langsung sebagai beban pada akun yang dipilih, misalnya 5600 Beban Lain-lain, tidak masuk nilai stok.
+- PPN 11% dihitung dari subtotal barang saja, tanpa biaya.
+- Biaya yang dibayar terpisah ke pihak lain (mis. ke kurir, bukan lewat pemasok) dicatat lewat **Kas & Bank → Kas Keluar**.
+- Rincian biaya tampil di detail faktur dan ikut terhapus bersama fakturnya.
+
 ## Memperbarui Apps Script (wajib setelah fitur persediaan)
 
-Fitur persediaan menambah tiga sheet (`Produk`, `FakturItem`, `Stok`) dan satu aksi baru di backend.
+Fitur persediaan menambah tiga sheet (`Produk`, `FakturItem`, `Stok`) dan satu aksi baru di backend. Biaya tambahan menambah satu sheet lagi (`FakturBiaya`, Code.gs versi 4), jadi pembaruan di bawah juga wajib untuk fitur biaya.
 
 1. Buka Apps Script spreadsheet-mu, tempel isi `apps-script/Code.gs` yang baru menggantikan isi lama.
 2. Token: file ini berisi `TOKEN = 'GANTI_TOKEN_RAHASIA'`. Pilih salah satu:
