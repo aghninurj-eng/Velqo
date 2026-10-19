@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@600;700&family=Figtree:wght@400;600&display=swap">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/nav.css">
+<link rel="stylesheet" href="assets/css/home.css">
 </head>
 <body>
 <div id="velqo-nav"></div>
@@ -15,7 +16,85 @@
 
 <main class="page">
   <h1>Beranda</h1>
-  <p class="lead">Ringkasan unit usaha Velqo akan tampil di sini.</p>
+  <p class="lead">Ringkasan unit usaha dan agenda tim Velqo.</p>
+
+  <!--
+    RINGKASAN HALAMAN LAIN
+    Bagian ini baru kerangka. Isi angka lewat window.VelqoHome.setRingkasan('nama', 'nilai')
+    (lihat assets/js/home.js). Setiap angka punya atribut data-ringkasan sebagai penandanya.
+  -->
+  <section aria-labelledby="ringkasan-judul" class="home-section">
+    <div class="section-head">
+      <h2 id="ringkasan-judul">Ringkasan</h2>
+    </div>
+
+    <div class="summary-grid">
+      <article class="panel summary-card" id="ringkasan-keuangan">
+        <div class="summary-top">
+          <h3>Keuangan</h3>
+          <span class="badge badge-ready">Database siap</span>
+        </div>
+        <dl class="stats">
+          <div class="stat"><dt>Pengeluaran hari ini</dt><dd data-ringkasan="keuangan.pengeluaran">&mdash;</dd></div>
+          <div class="stat"><dt>Pembelian persediaan</dt><dd data-ringkasan="keuangan.persediaan">&mdash;</dd></div>
+          <div class="stat"><dt>Total utang</dt><dd data-ringkasan="keuangan.utang">&mdash;</dd></div>
+        </dl>
+        <a class="summary-link" href="keuangan/">Buka Keuangan</a>
+      </article>
+
+      <article class="panel summary-card" id="ringkasan-operasional">
+        <div class="summary-top">
+          <h3>Operasional</h3>
+          <span class="badge">Belum terhubung</span>
+        </div>
+        <div class="summary-empty" data-ringkasan="operasional.isi">Ringkasan akan tampil setelah halaman ini terhubung ke database.</div>
+        <a class="summary-link" href="operasional/">Buka Operasional</a>
+      </article>
+
+      <article class="panel summary-card" id="ringkasan-internal-control">
+        <div class="summary-top">
+          <h3>Internal Control</h3>
+          <span class="badge">Belum terhubung</span>
+        </div>
+        <div class="summary-empty" data-ringkasan="internal-control.isi">Ringkasan akan tampil setelah halaman ini terhubung ke database.</div>
+        <a class="summary-link" href="internal-control/">Buka Internal Control</a>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="kalender-judul" class="home-section">
+    <div class="section-head">
+      <h2 id="kalender-judul">Kalender Agenda</h2>
+    </div>
+
+    <div class="panel cal">
+      <div class="cal-toolbar">
+        <div class="cal-nav">
+          <button type="button" class="btn" id="cal-prev" aria-label="Bulan sebelumnya">&larr;</button>
+          <button type="button" class="btn" id="cal-next" aria-label="Bulan berikutnya">&rarr;</button>
+          <button type="button" class="btn" id="cal-today">Hari ini</button>
+        </div>
+        <h3 class="cal-title" id="cal-title" aria-live="polite"></h3>
+        <label class="cal-jump">
+          <span>Pilih bulan</span>
+          <input type="month" id="cal-jump">
+        </label>
+      </div>
+
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+    <div class="panel agenda" aria-live="polite">
+      <div class="agenda-head">
+        <h3 id="agenda-title"></h3>
+        <button type="button" class="btn" id="agenda-all" hidden>Lihat semua bulan ini</button>
+      </div>
+      <div id="agenda-list"></div>
+    </div>
+  </section>
 </main>
+
+<script src="assets/js/agenda.js"></script>
+<script src="assets/js/home.js"></script>
 </body>
 </html>
