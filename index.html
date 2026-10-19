@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@600;700&family=Figtree:wght@400;600&display=swap">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/nav.css">
-<link rel="stylesheet" href="assets/css/home.css">
+<link rel="stylesheet" href="assets/css/home.css?v=2">
 </head>
 <body>
 <div id="velqo-nav"></div>
@@ -15,15 +15,15 @@
 <script src="assets/js/nav.js"></script>
 
 <main class="page">
-  <h1>Beranda</h1>
-  <p class="lead">Ringkasan unit usaha dan agenda tim Velqo.</p>
+  <h1 class="no-print">Beranda</h1>
+  <p class="lead no-print">Ringkasan unit usaha dan agenda tim Velqo.</p>
 
   <!--
     RINGKASAN HALAMAN LAIN
     Bagian ini baru kerangka. Isi angka lewat window.VelqoHome.setRingkasan('nama', 'nilai')
     (lihat assets/js/home.js). Setiap angka punya atribut data-ringkasan sebagai penandanya.
   -->
-  <section aria-labelledby="ringkasan-judul" class="home-section">
+  <section aria-labelledby="ringkasan-judul" class="home-section no-print">
     <div class="section-head">
       <h2 id="ringkasan-judul">Ringkasan</h2>
     </div>
@@ -62,10 +62,18 @@
     </div>
   </section>
 
-  <section aria-labelledby="kalender-judul" class="home-section">
+  <section aria-labelledby="kalender-judul" class="home-section no-print">
     <div class="section-head">
       <h2 id="kalender-judul">Kalender Agenda</h2>
+      <div class="section-actions">
+        <span class="badge" id="ag-mode"></span>
+        <button type="button" class="btn" id="ag-settings">Pengaturan</button>
+        <button type="button" class="btn" id="ag-print">Cetak PDF</button>
+        <button type="button" class="btn btn-primary" id="ag-add">+ Tambah kegiatan</button>
+      </div>
     </div>
+
+    <div class="note" id="ag-demo-note" hidden>Mode demo: kegiatan hanya tersimpan di browser ini dan belum terlihat oleh tim. Hubungkan ke Google Spreadsheet lewat tombol Pengaturan agar kalender dipakai bersama.</div>
 
     <div class="panel cal">
       <div class="cal-toolbar">
@@ -81,7 +89,7 @@
         </label>
       </div>
 
-      <div class="cal-grid" id="cal-grid"></div>
+      <div class="cal-grid" id="cal-grid" role="group" aria-labelledby="cal-title"></div>
     </div>
 
     <div class="panel agenda" aria-live="polite">
@@ -92,9 +100,71 @@
       <div id="agenda-list"></div>
     </div>
   </section>
+
+  <!-- Tampilan khusus cetak (disembunyikan di layar). Diisi oleh home.js. -->
+  <section class="cal-print" id="cal-print" aria-hidden="true"></section>
 </main>
 
-<script src="assets/js/agenda.js"></script>
-<script src="assets/js/home.js"></script>
+<!-- Formulir tambah/ubah kegiatan -->
+<dialog class="dlg" id="ag-dialog" aria-labelledby="ag-dlg-title">
+  <form id="ag-form" novalidate>
+    <div class="dlg-head">
+      <h3 id="ag-dlg-title">Tambah kegiatan</h3>
+      <button type="button" class="btn btn-sm" id="ag-dlg-x" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="dlg-body">
+      <label class="field full"><span>Nama kegiatan *</span><input name="judul" maxlength="120" autocomplete="off"></label>
+      <label class="field"><span>Tanggal *</span><input type="date" name="tanggal"></label>
+      <label class="field"><span>Sampai tanggal (opsional)</span><input type="date" name="selesai"></label>
+      <label class="field"><span>Jam mulai</span><input type="time" name="mulai"></label>
+      <label class="field"><span>Jam selesai</span><input type="time" name="akhir"></label>
+      <label class="field full"><span>Unit</span>
+        <select name="unit">
+          <option value="">Umum</option>
+          <option value="Keuangan">Keuangan</option>
+          <option value="Operasional">Operasional</option>
+          <option value="Internal Control">Internal Control</option>
+        </select>
+      </label>
+      <label class="field full"><span>Catatan</span><textarea name="catatan" rows="3" maxlength="500"></textarea></label>
+      <label class="field full"><span>Diinput oleh</span><input name="pembuat" maxlength="60" autocomplete="name"></label>
+      <p class="dlg-error" id="ag-dlg-error" role="alert" hidden></p>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn btn-danger" id="ag-delete" hidden>Hapus</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="ag-cancel">Batal</button>
+      <button type="submit" class="btn btn-primary" id="ag-save">Simpan</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Pengaturan sambungan database agenda -->
+<dialog class="dlg" id="ag-cfg-dialog" aria-labelledby="ag-cfg-title">
+  <form id="ag-cfg-form" novalidate>
+    <div class="dlg-head">
+      <h3 id="ag-cfg-title">Sambungan database agenda</h3>
+      <button type="button" class="btn btn-sm" id="ag-cfg-x" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="dlg-body">
+      <label class="field full"><span>URL Web App Apps Script (berakhiran /exec)</span><input name="url" placeholder="https://script.google.com/macros/s/&hellip;/exec" autocomplete="off"></label>
+      <label class="field full"><span>Token (sama dengan TOKEN di Apps Script agenda)</span><input name="token" type="password" autocomplete="off"></label>
+      <p class="dlg-hint">Token disimpan di browser perangkat ini saja. Minta token ke admin. Cara memasang backend ada di apps-script/agenda/README.md.</p>
+      <p class="dlg-msg" id="ag-cfg-msg" role="status" hidden></p>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn btn-danger" id="ag-cfg-off" hidden>Kembali ke mode demo</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="ag-cfg-test">Tes koneksi</button>
+      <button type="submit" class="btn btn-primary" id="ag-cfg-save">Simpan &amp; muat ulang</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="ag-toast" role="status" aria-live="polite" hidden></div>
+
+<script src="assets/js/agenda.js?v=2"></script>
+<script src="assets/js/agenda-api.js?v=2"></script>
+<script src="assets/js/home.js?v=2"></script>
 </body>
 </html>

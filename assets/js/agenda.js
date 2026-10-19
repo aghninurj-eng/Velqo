@@ -1,19 +1,16 @@
 /*
-  DATA AGENDA VELQO
-  Edit file ini untuk menambah, mengubah, atau menghapus agenda. Kalender di beranda membacanya otomatis.
+  KONFIGURASI AGENDA VELQO
 
-  tanggal : wajib, format 'TTTT-BB-HH', contoh '2026-10-28'
-  judul   : wajib, nama agenda
-  waktu   : opsional, contoh '09:00' atau '09:00 - 11:00'
-  selesai : opsional, tanggal akhir untuk agenda beberapa hari, contoh '2026-10-30'
-  unit    : opsional, 'Keuangan', 'Operasional', 'Internal Control', atau kosong untuk umum
-  catatan : opsional, keterangan singkat
+  API_URL : alamat Web App Apps Script agenda (berakhiran /exec).
+            Boleh diisi di sini supaya staf tidak perlu mengetik URL. URL saja tidak cukup untuk
+            membaca atau mengubah data, karena setiap permintaan tetap membutuhkan token.
+            Kosongkan untuk memakai mode demo (kegiatan hanya tersimpan di browser masing-masing).
 
-  Contoh (hapus tanda komentar untuk mencoba):
-  { tanggal: '2026-10-28', waktu: '09:00', judul: 'Rapat evaluasi bulanan', unit: 'Operasional', catatan: 'Ruang rapat utama' },
+  TOKEN   : JANGAN ditulis di file ini (repositori ini ikut terpublikasi). Setiap staf mengisinya
+            sekali lewat tombol "Pengaturan" di kalender beranda; tersimpan di browser perangkatnya.
 
-  Nanti jika agenda dipindah ke database, cukup isi window.VELQO_AGENDA dari database;
-  kalender di home.js tidak perlu diubah.
+  Cara memasang backend: lihat apps-script/agenda/README.md
 */
-window.VELQO_AGENDA = [
-];
+window.VELQO_AGENDA_CONFIG = {
+  API_URL: ''
+};
