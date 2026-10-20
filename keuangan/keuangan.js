@@ -106,10 +106,11 @@ const akunBy = kode => S.Akun.find(a => a.kode === String(kode));
 const akunNama = kode => { const a = akunBy(kode); return a ? a.kode + ' · ' + a.nama : kode; };
 const kasAkun = () => S.Akun.filter(a => a.kategori === 'Kas & Bank').sort((a, b) => a.kode.localeCompare(b.kode));
 
-function nextNo(prefix, date) {
+function nextNo(prefix, date, extra = []) {
   const pre = prefix + '/' + date.slice(0, 7).replace('-', '') + '/';
   let max = 0;
-  S.Jurnal.forEach(j => { if (j.nomor.startsWith(pre)) max = Math.max(max, parseInt(j.nomor.slice(pre.length)) || 0); });
+  const scan = j => { if (j.nomor.startsWith(pre)) max = Math.max(max, parseInt(j.nomor.slice(pre.length)) || 0); };
+  S.Jurnal.forEach(scan); extra.forEach(scan);
   return pre + String(max + 1).padStart(4, '0');
 }
 function jurnalRows({ tanggal, nomor, keterangan, sumber, ref, lines }) {
@@ -206,7 +207,9 @@ const labaRugi = (from, to) => {
    `biaya` ([{nama, jumlah, akun}], hanya pembelian): ongkir, admin, dll. yang ikut ditagihkan di faktur (menambah hutang).
    akun 'stok' = ditambahkan ke nilai barang (dibagi proporsional ke tiap produk, atau ke akun faktur bila tanpa produk);
    kode akun beban = dicatat sebagai beban. PPN dihitung dari subtotal barang saja. */
-async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items, biaya }) {
+/* buildFaktur menyusun faktur beserta baris item, stok, dan jurnalnya TANPA menyimpan. `ctx` ({Jurnal, Stok, sm}) opsional:
+   dipakai impor massal agar nomor dan stok memperhitungkan faktur sebelumnya yang belum tersimpan. */
+function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items, biaya }, ctx) {
   const sales = jenis === 'penjualan';
   biaya = (biaya || []).filter(b => String(b.nama || '').trim() || num(b.jumlah)).map(b => ({ nama: String(b.nama || '').trim(), jumlah: Math.round(num(b.jumlah)), akun: String(b.akun || 'stok') }));
   if (biaya.length) {
@@ -218,20 +221,21 @@ async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, ak
     });
   }
   const capTotal = biaya.filter(b => b.akun === 'stok').reduce((a, b) => a + b.jumlah, 0);
-  items = (items || []).filter(i => i.produk_id && num(i.qty) > 0).map(i => ({ produk_id: i.produk_id, qty: rq(i.qty), harga: num(i.harga) }));
+  items = (items || []).filter(i => i.produk_id && num(i.qty) > 0).map(i => ({ produk_id: i.produk_id, qty: rq(i.qty), harga: num(i.harga), sub: i.subtotal == null ? null : Math.round(num(i.subtotal)) }));
   const useItems = items.length > 0;
   let itemRows = [], stokRows = [], cogs = 0;
-  const id = uid(), nomor = nextNo(sales ? 'INV' : 'BILL', tanggal);
+  const localStok = {};
+  const id = uid(), nomor = nextNo(sales ? 'INV' : 'BILL', tanggal, ctx ? ctx.Jurnal : []);
   if (useItems) {
     needInv();
     items.forEach(i => { if (!produkBy(i.produk_id)) throw new Error('Produk tidak ditemukan'); if (i.harga < 0) throw new Error('Harga tidak boleh negatif'); });
-    itemRows = items.map(i => ({ id: uid(), faktur_id: id, produk_id: i.produk_id, qty: i.qty, harga: i.harga, subtotal: Math.round(i.qty * i.harga) }));
+    itemRows = items.map(i => ({ id: uid(), faktur_id: id, produk_id: i.produk_id, qty: i.qty, harga: i.harga, subtotal: i.sub != null ? i.sub : Math.round(i.qty * i.harga) }));
     subtotal = itemRows.reduce((a, r) => a + r.subtotal, 0);
     akun = sales ? AK.penjualan : AK.persediaan;
     if (sales) {
-      const cur = stokMap();
+      const base = ctx && ctx.sm ? ctx.sm : stokMap(ctx ? S.Stok.concat(ctx.Stok) : S.Stok);
       for (const r of itemRows) {
-        const o = cur[r.produk_id] || (cur[r.produk_id] = { qty: 0, nilai: 0 }), p = produkBy(r.produk_id);
+        const o = localStok[r.produk_id] || (localStok[r.produk_id] = { ...(base[r.produk_id] || { qty: 0, nilai: 0 }) }), p = produkBy(r.produk_id);
         if (r.qty > o.qty + EPS) throw new Error('Stok ' + p.nama + ' tidak cukup (tersedia ' + fq(o.qty) + ' ' + p.satuan + ')');
         const nilai = Math.abs(r.qty - o.qty) < EPS ? o.nilai : Math.round(r.qty * (o.nilai / o.qty));
         stokRows.push({ id: uid(), tanggal, nomor, produk_id: r.produk_id, jenis: 'jual', qty: -r.qty, harga: Math.round(nilai / r.qty * 100) / 100, nilai: -nilai, keterangan: 'Penjualan ke ' + pihak, ref: id });
@@ -259,7 +263,13 @@ async function createFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, ak
     ? [{ kode: AK.piutang, debit: total }, { kode: akun, kredit: subtotal }, { kode: AK.ppnKeluar, kredit: ppnAmt }, { kode: AK.pembelian, debit: cogs }, { kode: AK.persediaan, kredit: cogs }]
     : [{ kode: akun, debit: subtotal }, ...capLine, ...biayaLines, { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
   const jr = jurnalRows({ tanggal, nomor, keterangan: (sales ? 'Penjualan ke ' : 'Pembelian dari ') + pihak + (keterangan ? ' - ' + keterangan : ''), sumber: sales ? 'INV' : 'BILL', ref: id, lines });
-  await Store.appendMany({ Faktur: [f], FakturItem: itemRows, FakturBiaya: Store.biayaReady ? biayaRows : [], Stok: stokRows, Jurnal: jr });
+  const rows = { Faktur: [f], FakturItem: itemRows, FakturBiaya: Store.biayaReady ? biayaRows : [], Stok: stokRows, Jurnal: jr };
+  if (ctx) { ctx.Jurnal.push(...jr); ctx.Stok.push(...stokRows); if (ctx.sm) Object.assign(ctx.sm, localStok); }
+  return { f, rows };
+}
+async function createFaktur(args) {
+  const { f, rows } = buildFaktur(args);
+  await Store.appendMany(rows);
   return f;
 }
 async function hapusFaktur(f) {
@@ -427,12 +437,13 @@ function pFaktur(jenis) {
   const tot = all.filter(f => f.tanggal >= monthStart() && f.tanggal <= monthEnd()).reduce((x, f) => x + f.total, 0);
   return `<h2>${sales ? 'Penjualan' : 'Pembelian'}</h2><p class="fin-sub">${sales ? 'Faktur penjualan dan penerimaan pembayaran (piutang)' : 'Faktur pembelian dan pembayaran ke pemasok (hutang)'}</p>
   <div class="cards"><div class="card"><div class="l">Total bulan ini</div><div class="v">${rp(tot)}</div></div><div class="card"><div class="l">${sales ? 'Belum diterima' : 'Belum dibayar'}</div><div class="v">${rp(open)}</div></div><div class="card"><div class="l">Jatuh tempo</div><div class="v ${od ? 'bad' : ''}">${rp(od)}</div></div></div>
-  <div class="bar"><button class="pri" id="addf">+ Faktur ${sales ? 'Penjualan' : 'Pembelian'}</button><span class="sp"></span><input id="q" placeholder="Cari nomor / ${sales ? 'pelanggan' : 'pemasok'}…" value="${esc(st.q[jenis] || '')}"></div>
+  <div class="bar"><button class="pri" id="addf">+ Faktur ${sales ? 'Penjualan' : 'Pembelian'}</button>${sales ? '<button id="impm">⬆ Impor dari Marketplace</button>' : ''}<span class="sp"></span><input id="q" placeholder="Cari nomor / ${sales ? 'pelanggan' : 'pemasok'}…" value="${esc(st.q[jenis] || '')}"></div>
   <div class="panel" style="padding:0">${list.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>${sales ? 'Pelanggan' : 'Pemasok'}</th><th>Jatuh tempo</th><th class="r">Total</th><th class="r">Sisa</th><th>Status</th></tr>
   ${list.map(f => { const [t, c] = fakturStatus(f); return `<tr class="rowc" data-f="${f.id}"><td>${tgl(f.tanggal)}</td><td>${esc(f.nomor)}</td><td>${esc(f.pihak)}<div class="mut">${esc(f.keterangan)}</div></td><td>${tgl(f.jatuh_tempo)}</td><td class="r">${rp(f.total)}</td><td class="r">${rp(f.total - f.terbayar)}</td><td><span class="tag ${c}">${t}</span></td></tr>`; }).join('')}</table>` : empty('Belum ada faktur')}</div>`;
 }
 function bindFaktur(jenis) {
   $('#addf').onclick = () => fakturForm(jenis);
+  if ($('#impm')) $('#impm').onclick = () => (window.imporModal ? window.imporModal() : toast('Modul impor belum termuat, muat ulang halaman', true));
   $('#q').oninput = e => { st.q[jenis] = e.target.value; const p = e.target.selectionStart; render(); const el = $('#q'); el.focus(); el.setSelectionRange(p, p); };
   $$('[data-f]').forEach(el => el.onclick = () => fakturDetail(el.dataset.f));
 }

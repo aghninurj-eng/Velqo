@@ -146,3 +146,19 @@
 @media print {
   .vnav, .fin-tabs, .fin .bar, .fin .tabs { display: none !important; }
 }
+
+/* Impor marketplace: sembunyikan kolom yang kurang penting di layar sempit agar tabel muat tanpa digeser */
+.fin .show-sm { display: none; }
+@media (max-width: 700px) {
+  .fin .hide-sm { display: none; }
+  .fin .show-sm { display: block; }
+  /* baris pratinjau bertumpuk: nomor + total di atas, tanggal di bawah nomor, status satu baris penuh */
+  .fin table.pv, .fin table.pv tbody { display: block; width: 100%; }
+  .fin table.pv tr.hd { display: none; }
+  .fin table.pv tr { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .fin table.pv td { display: block; padding: 0; border: 0; min-width: 0; }
+  .fin table.pv td.hide-sm { display: none; }
+  .fin table.pv td.pno { grid-column: 1; overflow-wrap: anywhere; }
+  .fin table.pv td.ptot { grid-column: 2; }
+  .fin table.pv td.pst { grid-column: 1 / -1; }
+}
