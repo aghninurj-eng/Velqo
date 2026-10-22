@@ -53,6 +53,13 @@ Tombol **⬆ Impor dari Marketplace** di tab Penjualan membaca file ekspor pesan
 - Mengimpor ribuan pesanan sekaligus didukung (diuji 3.000 pesanan). Penyimpanan dikirim per 50 pesanan ke Spreadsheet, jadi butuh waktu; pantau teks "Menyimpan ... / ..." di tombol.
 - Tombol "Unduh template CSV" di jendela impor menyediakan format paling sederhana bila marketplace tidak menyediakan ekspor yang cocok.
 
+## Catatan impor pesanan
+
+- Baris tanpa SKU dengan nilai Rp 0 (barang gratis/hadiah di pesanan Shopee) dilewati, tidak membuat pesanan gagal.
+- No. resi (No. Resi Shopee, Tracking ID TikTok) dicatat di keterangan faktur: `Shopee #<no pesanan> · <pembeli> · Resi <no resi>`.
+- Faktur memakai Harga Setelah Diskon (Shopee) atau SKU Subtotal After Discount (TikTok). Harga awal tidak disimpan terpisah.
+- File XLSX TikTok yang menomori semua baris "1" kini terbaca benar.
+
 ## Penerimaan dana massal marketplace
 
 Di tab **Penjualan** klik **⬇ Terima Dana Marketplace**, lalu pilih file penghasilan dari Seller Center (Shopee: Penghasilan, Sudah Dilepas; TikTok Shop: Finance, Pendapatan). Format `.xlsx` dan `.csv` dibaca di browser, lembar kerja dan kolom dikenali otomatis dan bisa diubah.

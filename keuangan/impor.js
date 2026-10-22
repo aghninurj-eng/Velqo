@@ -23,6 +23,7 @@
   const FIELDS = [
     { k: 'nomor', l: 'No. pesanan', req: true, syn: ['nopesanan', 'nomorpesanan', 'orderid', 'ordernumber', 'orderno', 'idpesanan', 'noorder', 'nomororder'] },
     { k: 'tanggal', l: 'Tanggal pesanan', req: true, syn: ['waktupesanandibuat', 'tanggalpesanan', 'waktupesanan', 'ordercreationdate', 'ordercreatedtime', 'createdtime', 'createtime', 'orderdate', 'tanggalorder', 'tanggal', 'waktupembayarandilakukan', 'paidtime'] },
+    { k: 'resi', l: 'No. resi (opsional, dicatat di keterangan faktur)', syn: ['noresi', 'nomorresi', 'trackingid', 'trackingnumber', 'awb'] },
     { k: 'status', l: 'Status pesanan', syn: ['statuspesanan', 'orderstatus', 'status'] },
     { k: 'pembeli', l: 'Pembeli (opsional)', syn: ['usernamepembeli', 'buyerusername', 'namapembeli', 'buyername', 'namapenerima', 'recipient', 'pembeli'] },
     { k: 'sku', l: 'SKU (dicocokkan dengan Kode produk)', syn: ['nomorreferensisku', 'sellersku', 'skuvariasi', 'skupenjual', 'sku'] },
@@ -111,22 +112,25 @@
     }
     const out = [];
     for (const it of list) {
-      const sheet = xml(await z.read(it.path)), rows = [];
+      // Posisi sel diambil dari alamat sel itu sendiri (mis. "G2"), bukan dari elemen baris: sebagian ekspor (TikTok Shop)
+      // menaruh tiap sel di baris sendiri dan menomori semua baris "1".
+      const sheet = xml(await z.read(it.path)), rows = []; let rowIdx = -1, rowSeq = -1;
       for (const row of sheet.getElementsByTagName('row')) {
-        const ri = (parseInt(row.getAttribute('r')) || rows.length + 1) - 1, cells = [];
-        let ci = 0;
+        const rn = parseInt(row.getAttribute('r')); rowSeq = Math.max(isNaN(rn) ? 0 : rn - 1, rowSeq + 1); let ci = 0;
         for (const c of row.getElementsByTagName('c')) {
-          const ref = c.getAttribute('r'), m = ref && /^([A-Z]+)/.exec(ref);
-          if (m) { let n = 0; for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; ci = n - 1; }
+          const ref = c.getAttribute('r'), m = ref && /^([A-Z]+)(\d+)$/.exec(ref);
+          let ri = rowSeq;
+          if (m) { let n = 0; for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; ci = n - 1; ri = parseInt(m[2]) - 1; }
           const t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0];
           let val = '';
           if (t === 's') val = v ? (ss[parseInt(v.textContent)] || '') : '';
           else if (t === 'inlineStr') val = Array.from(c.getElementsByTagName('t')).map(x => x.textContent).join('');
           else val = v ? v.textContent : '';
-          cells[ci] = val; ci++;
+          (rows[ri] || (rows[ri] = []))[ci] = val; ci++; rowIdx = Math.max(rowIdx, ri);
         }
-        rows[ri] = Array.from(cells, x => x == null ? '' : x);
+        rowSeq = Math.max(rowSeq, rowIdx);
       }
+      for (let i = 0; i < rows.length; i++) if (rows[i]) rows[i] = Array.from(rows[i], x => x == null ? '' : x);
       out.push({ name: it.name, rows: trimTail(Array.from(rows, r => r || [])) });
     }
     return out;
@@ -233,7 +237,7 @@
     groups.forEach((g, no) => {
       const st0 = get(g[0], 'status') || NO_STATUS;
       if (!imp.statusOn[st0]) { res.skippedStatus.set(st0, (res.skippedStatus.get(st0) || 0) + 1); return; }
-      const o = { no, status: st0, pembeli: get(g[0], 'pembeli').replace(/ · /g, ' '), tanggal: parseDateStr(get(g[0], 'tanggal'), order), items: [], total: 0, state: 'ok', msg: '' };
+      const o = { no, status: st0, resi: g.map(r => get(r, 'resi')).find(x => x && x !== '-') || '', pembeli: get(g[0], 'pembeli').replace(/ · /g, ' '), tanggal: parseDateStr(get(g[0], 'tanggal'), order), items: [], total: 0, state: 'ok', msg: '' };
       res.orders.push(o);
       let bad = '';
       for (const r of g) {
@@ -242,6 +246,8 @@
         if (!(qty > 0)) { bad = bad || 'Jumlah tidak valid'; continue; }
         const line = !isNaN(sub) ? Math.round(sub) : !isNaN(hrg) ? Math.round(qty * hrg) : NaN;
         if (isNaN(line) || line < 0) { bad = bad || 'Harga tidak terbaca'; continue; }
+        // Barang gratis/hadiah (tanpa SKU, nilai Rp 0) tidak dicatat: tidak ada pendapatan dan tidak ada stok yang bisa dicocokkan.
+        if (!sku && line === 0) { o.gift = (o.gift || 0) + 1; continue; }
         o.items.push({ sku, nama: get(r, 'nama'), qty: rq(qty), line, harga: line / qty });
         o.total += line;
       }
@@ -262,7 +268,7 @@
 
     cand.sort((a, b) => a.tanggal.localeCompare(b.tanggal) || a.no.localeCompare(b.no));
     for (const o of cand) {
-      const base = { jenis: 'penjualan', tanggal: o.tanggal, jatuh_tempo: addDays(o.tanggal, imp.days), pihak: label, keterangan: label + ' #' + o.no + (o.pembeli ? ' · ' + o.pembeli : ''), ppn: false };
+      const base = { jenis: 'penjualan', tanggal: o.tanggal, jatuh_tempo: addDays(o.tanggal, imp.days), pihak: label, keterangan: label + ' #' + o.no + (o.pembeli ? ' · ' + o.pembeli : '') + (o.resi ? ' · Resi ' + o.resi : ''), ppn: false };
       try {
         const b = buildFaktur(imp.matchStock
           ? { ...base, items: o.items.map(i => ({ produk_id: i.pid, qty: i.qty, harga: i.harga, subtotal: i.line })) }
@@ -412,7 +418,7 @@
     render();
     modal('Impor selesai', `<div class="cards"><div class="card"><div class="l">Pesanan diimpor</div><div class="v ok">${done}</div></div><div class="card"><div class="l">Total penjualan</div><div class="v">${rp(total)}</div></div></div>
       <p class="mut" style="margin:10px 0 0">Dilewati: ${c.dup} sudah pernah diimpor, ${skip} karena status, ${c.sku} SKU belum cocok, ${c.stok} stok kurang, ${c.err + c.tgl} galat data.</p>
-      <p style="margin:12px 0 0">Setiap pesanan tercatat sebagai faktur penjualan <b>belum lunas</b> atas nama <b>${esc(label)}</b>. Saat dana cair, buka fakturnya lalu klik <b>Terima pembayaran</b>. Potongan komisi dan biaya layanan marketplace belum dicatat otomatis; catat selisihnya lewat Kas &amp; Bank &rarr; Kas Keluar ke akun beban.</p>`,
+      <p style="margin:12px 0 0">Setiap pesanan tercatat sebagai faktur penjualan <b>belum lunas</b> atas nama <b>${esc(label)}</b>. Saat dana cair, klik <b>Terima Dana Marketplace</b> dan unggah file penghasilannya: pelunasan dan potongan komisi, biaya layanan, serta ongkir dicatat sekaligus.</p>`,
       '<button class="pri" data-close>Tutup</button>');
     imp = null;
   }
