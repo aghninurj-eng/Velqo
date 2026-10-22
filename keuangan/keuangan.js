@@ -42,7 +42,7 @@ const API_URL = saved.url || CONFIG.API_URL, TOKEN = saved.token || CONFIG.TOKEN
 let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [] };
 
 // Versi Code.gs yang diharapkan halaman ini (lihat VERSI di Code.gs). Dipakai untuk menjelaskan galat token.
-const BACKEND_VERSI = 4;
+const BACKEND_VERSI = 5;
 function apiErr(j, fallback) {
   let m = (j && j.error) || fallback;
   if (/^Token salah/.test(m)) {
@@ -55,6 +55,7 @@ function apiErr(j, fallback) {
 const Store = {
   live: !!API_URL,
   invReady: true, // false bila Code.gs di Apps Script belum diperbarui (belum punya sheet Produk/Stok)
+  ver: 0, // versi Code.gs yang aktif (dikirim backend di setiap respons)
   biayaReady: true, // false bila belum punya sheet FakturBiaya (Code.gs versi 4)
   async post(body) {
     const r = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, token: TOKEN }) });
@@ -67,7 +68,7 @@ const Store = {
       const r = await fetch(API_URL + (API_URL.includes('?') ? '&' : '?') + 'action=all&token=' + encodeURIComponent(TOKEN));
       const j = await r.json();
       if (!j.ok) throw new Error(apiErr(j, 'Gagal memuat data'));
-      S = j.data;
+      S = j.data; this.ver = j.v || 0;
       this.invReady = ['Produk', 'FakturItem', 'Stok'].every(k => Array.isArray(S[k]));
       this.biayaReady = Array.isArray(S.FakturBiaya);
     } else {
@@ -83,13 +84,22 @@ const Store = {
   save() { if (!this.live) localStorage.setItem('velqo_demo', JSON.stringify(S)); },
   async append(sheet, rows) { if (this.live) await this.post({ action: 'append', sheet, rows }); S[sheet].push(...rows); this.save(); },
   // Simpan beberapa sheet dalam satu permintaan ({Faktur:[...], Stok:[...], Jurnal:[...]}) agar tidak setengah jadi.
-  async appendMany(map) {
+  // `updates` = [{sheet, field, value, patch}] dijalankan bersama append dalam satu permintaan (Code.gs v5 ke atas).
+  async appendMany(map, updates = []) {
     const ops = Object.entries(map).filter(([, rows]) => rows.length).map(([sheet, rows]) => ({ sheet, rows }));
-    if (this.live && ops.length) {
-      if (this.invReady) await this.post({ action: 'multi', ops });
-      else for (const op of ops) await this.post({ action: 'append', sheet: op.sheet, rows: op.rows }); // Code.gs lama
+    if (this.live && (ops.length || updates.length)) {
+      if (this.ver >= 5) await this.post({ action: 'multi', ops, updates });
+      else {
+        if (this.invReady && !updates.length) await this.post({ action: 'multi', ops });
+        else {
+          for (const op of ops) await this.post({ action: 'append', sheet: op.sheet, rows: op.rows }); // Code.gs lama
+          for (const u of updates) await this.post({ action: 'update', ...u });
+        }
+      }
     }
-    ops.forEach(op => S[op.sheet].push(...op.rows)); this.save();
+    ops.forEach(op => S[op.sheet].push(...op.rows));
+    updates.forEach(u => { const r = S[u.sheet].find(x => String(x[u.field]) === String(u.value)); if (r) Object.assign(r, u.patch); });
+    this.save();
   },
   async update(sheet, field, value, patch) {
     if (this.live) await this.post({ action: 'update', sheet, field, value, patch });
@@ -437,13 +447,14 @@ function pFaktur(jenis) {
   const tot = all.filter(f => f.tanggal >= monthStart() && f.tanggal <= monthEnd()).reduce((x, f) => x + f.total, 0);
   return `<h2>${sales ? 'Penjualan' : 'Pembelian'}</h2><p class="fin-sub">${sales ? 'Faktur penjualan dan penerimaan pembayaran (piutang)' : 'Faktur pembelian dan pembayaran ke pemasok (hutang)'}</p>
   <div class="cards"><div class="card"><div class="l">Total bulan ini</div><div class="v">${rp(tot)}</div></div><div class="card"><div class="l">${sales ? 'Belum diterima' : 'Belum dibayar'}</div><div class="v">${rp(open)}</div></div><div class="card"><div class="l">Jatuh tempo</div><div class="v ${od ? 'bad' : ''}">${rp(od)}</div></div></div>
-  <div class="bar"><button class="pri" id="addf">+ Faktur ${sales ? 'Penjualan' : 'Pembelian'}</button>${sales ? '<button id="impm">⬆ Impor dari Marketplace</button>' : ''}<span class="sp"></span><input id="q" placeholder="Cari nomor / ${sales ? 'pelanggan' : 'pemasok'}…" value="${esc(st.q[jenis] || '')}"></div>
+  <div class="bar"><button class="pri" id="addf">+ Faktur ${sales ? 'Penjualan' : 'Pembelian'}</button>${sales ? '<button id="impm">⬆ Impor dari Marketplace</button><button id="trm">⬇ Terima Dana Marketplace</button>' : ''}<span class="sp"></span><input id="q" placeholder="Cari nomor / ${sales ? 'pelanggan' : 'pemasok'}…" value="${esc(st.q[jenis] || '')}"></div>
   <div class="panel" style="padding:0">${list.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>${sales ? 'Pelanggan' : 'Pemasok'}</th><th>Jatuh tempo</th><th class="r">Total</th><th class="r">Sisa</th><th>Status</th></tr>
   ${list.map(f => { const [t, c] = fakturStatus(f); return `<tr class="rowc" data-f="${f.id}"><td>${tgl(f.tanggal)}</td><td>${esc(f.nomor)}</td><td>${esc(f.pihak)}<div class="mut">${esc(f.keterangan)}</div></td><td>${tgl(f.jatuh_tempo)}</td><td class="r">${rp(f.total)}</td><td class="r">${rp(f.total - f.terbayar)}</td><td><span class="tag ${c}">${t}</span></td></tr>`; }).join('')}</table>` : empty('Belum ada faktur')}</div>`;
 }
 function bindFaktur(jenis) {
   $('#addf').onclick = () => fakturForm(jenis);
   if ($('#impm')) $('#impm').onclick = () => (window.imporModal ? window.imporModal() : toast('Modul impor belum termuat, muat ulang halaman', true));
+  if ($('#trm')) $('#trm').onclick = () => (window.terimaModal ? window.terimaModal() : toast('Modul penerimaan belum termuat, muat ulang halaman', true));
   $('#q').oninput = e => { st.q[jenis] = e.target.value; const p = e.target.selectionStart; render(); const el = $('#q'); el.focus(); el.setSelectionRange(p, p); };
   $$('[data-f]').forEach(el => el.onclick = () => fakturDetail(el.dataset.f));
 }
@@ -540,7 +551,9 @@ function fakturForm(jenis) {
 function fakturDetail(id) {
   const f = S.Faktur.find(x => x.id === id); if (!f) return;
   const sales = f.jenis === 'penjualan', sisa = f.total - f.terbayar, [t, c] = fakturStatus(f);
-  const pays = S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY') && ![AK.piutang, AK.hutang].includes(j.kode_akun));
+  const payRows = S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY') && ![AK.piutang, AK.hutang].includes(j.kode_akun));
+  const isKas = j => { const a = akunBy(j.kode_akun); return a && a.kategori === 'Kas & Bank'; };
+  const pays = payRows.filter(isKas), potong = payRows.filter(j => !isKas(j)); // potongan marketplace dari penerimaan dana massal
   const its = S.FakturItem.filter(i => i.faktur_id === f.id);
   const bys = S.FakturBiaya.filter(b => b.faktur_id === f.id), biayaSum = bys.length ? bys.reduce((a, b) => a + b.jumlah, 0) : Math.max(0, f.total - f.subtotal - f.ppn);
   const hpp = -S.Stok.filter(x => x.ref === f.id && x.jenis === 'jual').reduce((a, x) => a + x.nilai, 0);
@@ -550,7 +563,7 @@ function fakturDetail(id) {
     ${its.length ? `<table style="margin-bottom:10px"><tr><th>Produk</th><th class="r">Qty</th><th class="r">Harga satuan</th><th class="r">Subtotal</th></tr>${its.map(i => { const pr = produkBy(i.produk_id); return `<tr><td>${esc(produkNama(i.produk_id))}</td><td class="r">${fq(i.qty)} ${esc(pr ? pr.satuan : '')}</td><td class="r">${rp(i.harga)}</td><td class="r">${rp(i.subtotal)}</td></tr>`; }).join('')}</table>` : ''}
     ${bys.length ? `<table style="margin-bottom:10px"><tr><th>Biaya tambahan</th><th>Dicatat sebagai</th><th class="r">Jumlah</th></tr>${bys.map(b => `<tr><td>${esc(b.nama)}</td><td class="mut">${b.akun === AK.persediaan ? 'Nilai persediaan' : esc(akunNama(b.akun))}</td><td class="r">${rp(b.jumlah)}</td></tr>`).join('')}</table>` : ''}
     <table><tr><td>Subtotal${biayaSum ? ' barang' : ''}</td><td class="r">${rp(f.subtotal)}</td></tr>${biayaSum ? `<tr><td>Biaya tambahan</td><td class="r">${rp(biayaSum)}</td></tr>` : ''}<tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr>${hpp > 0 ? `<tr><td class="mut">HPP (modal barang terjual)</td><td class="r mut">${rp(hpp)}</td></tr>` : ''}</table>
-    <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map(j => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}`,
+    <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map(j => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}${potong.length ? `<h3 style="margin:14px 0 6px">Potongan marketplace</h3><table>${potong.map(j => `<tr><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit - j.kredit)}</td></tr>`).join('')}</table>` : ''}`,
     `${f.terbayar === 0 ? '<button class="dan" id="del" style="margin-right:auto">Hapus faktur</button>' : ''}<button data-close>Tutup</button>${sisa > 0.005 ? `<button class="pri" id="pay">${sales ? 'Terima pembayaran' : 'Bayar'}</button>` : ''}`);
   if ($('#del')) $('#del').onclick = () => { if (confirm('Hapus faktur ' + f.nomor + ' beserta jurnalnya?')) run(() => hapusFaktur(f), 'Faktur dihapus'); };
   if ($('#pay')) $('#pay').onclick = () => {

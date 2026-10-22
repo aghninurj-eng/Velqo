@@ -95,7 +95,13 @@ function doPost(e) {
       // Beberapa sheet sekaligus dalam satu kunci, supaya faktur + item + stok + jurnal tersimpan bersama.
       const ops = b.ops || [];
       for (let i = 0; i < ops.length; i++) if (!SHEETS[ops[i].sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal: ' + ops[i].sheet });
+      // Pembaruan baris (mis. kolom terbayar di Faktur) ikut satu permintaan. Semua kunci diperiksa dulu sebelum ada yang ditulis.
+      const ups = b.updates || [];
+      for (let i = 0; i < ups.length; i++) if (!SHEETS[ups[i].sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal: ' + ups[i].sheet });
+      const plan = ups.map(function (u) { return { u: u, row: findRow_(u.sheet, u.field, u.value) }; });
+      plan.forEach(function (x) { if (x.row < 0) throw new Error('Data tidak ditemukan: ' + x.u.sheet + ' ' + x.u.value); });
       ops.forEach(function (op) { append_(op.sheet, op.rows); });
+      plan.forEach(function (x) { update_(x.u.sheet, x.u.field, x.u.value, x.u.patch); });
       return json_({ ok: true });
     }
     if (!SHEETS[b.sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal' });
@@ -112,7 +118,7 @@ function doPost(e) {
 }
 
 // Naikkan angka ini setiap Code.gs diubah; halaman Keuangan memakainya untuk mendiagnosis deployment yang belum diperbarui.
-const VERSI = 4;
+const VERSI = 5;
 
 function token_() {
   const p = PropertiesService.getScriptProperties().getProperty('TOKEN');
@@ -179,6 +185,14 @@ function append_(name, rows) {
     return headers.map(function (h) { return r[h] === undefined ? '' : r[h]; });
   });
   sh.getRange(start, 1, values.length, headers.length).setValues(values);
+}
+
+function findRow_(name, field, value) {
+  const sh = sheet_(name), col = SHEETS[name].indexOf(field), last = sh.getLastRow();
+  if (col < 0 || last < 2) return -1;
+  const keys = sh.getRange(2, col + 1, last - 1, 1).getValues();
+  for (let i = 0; i < keys.length; i++) if (String(keys[i][0]) === String(value)) return i + 2;
+  return -1;
 }
 
 function update_(name, field, value, patch) {

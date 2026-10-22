@@ -90,43 +90,48 @@
     };
   }
   const xml = t => new DOMParser().parseFromString(t, 'application/xml');
-  async function parseXLSX(buf) {
-    const z = await unzip(buf);
-    let sheetPath = null;
+  // Semua lembar kerja: [{ name, rows }]. Lembar pertama dipakai impor pesanan, lembar lain dipakai penerimaan dana.
+  async function parseXLSXSheets(buf) {
+    const z = await unzip(buf), list = [];
     try {
-      const wb = xml(await z.read('xl/workbook.xml')), sh = wb.getElementsByTagName('sheet')[0];
-      const rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
-      const rels = xml(await z.read('xl/_rels/workbook.xml.rels'));
-      for (const r of rels.getElementsByTagName('Relationship')) {
-        if (r.getAttribute('Id') === rid) { const t = r.getAttribute('Target'); sheetPath = t.startsWith('/') ? t.slice(1) : 'xl/' + t; }
+      const wb = xml(await z.read('xl/workbook.xml')), rels = xml(await z.read('xl/_rels/workbook.xml.rels')), tg = {};
+      for (const r of rels.getElementsByTagName('Relationship')) { const t = r.getAttribute('Target'); tg[r.getAttribute('Id')] = t.startsWith('/') ? t.slice(1) : 'xl/' + t; }
+      for (const sh of wb.getElementsByTagName('sheet')) {
+        const rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+        if (tg[rid] && z.names.includes(tg[rid])) list.push({ name: sh.getAttribute('name'), path: tg[rid] });
       }
     } catch { /* pakai cadangan di bawah */ }
-    if (!sheetPath || !z.names.includes(sheetPath)) sheetPath = z.names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort()[0];
-    if (!sheetPath) throw new Error('Lembar kerja tidak ditemukan di file XLSX.');
+    if (!list.length) z.names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort().forEach((n, i) => list.push({ name: 'Lembar ' + (i + 1), path: n }));
+    if (!list.length) throw new Error('Lembar kerja tidak ditemukan di file XLSX.');
     const ss = [];
     const ssText = await z.read('xl/sharedStrings.xml');
     if (ssText) for (const si of xml(ssText).getElementsByTagName('si')) {
       let t = ''; for (const n of si.getElementsByTagName('t')) if (n.parentNode.nodeName !== 'rPh') t += n.textContent;
       ss.push(t);
     }
-    const sheet = xml(await z.read(sheetPath)), rows = [];
-    for (const row of sheet.getElementsByTagName('row')) {
-      const ri = (parseInt(row.getAttribute('r')) || rows.length + 1) - 1, out = [];
-      let ci = 0;
-      for (const c of row.getElementsByTagName('c')) {
-        const ref = c.getAttribute('r'), m = ref && /^([A-Z]+)/.exec(ref);
-        if (m) { let n = 0; for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; ci = n - 1; }
-        const t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0];
-        let val = '';
-        if (t === 's') val = v ? (ss[parseInt(v.textContent)] || '') : '';
-        else if (t === 'inlineStr') val = Array.from(c.getElementsByTagName('t')).map(x => x.textContent).join('');
-        else val = v ? v.textContent : '';
-        out[ci] = val; ci++;
+    const out = [];
+    for (const it of list) {
+      const sheet = xml(await z.read(it.path)), rows = [];
+      for (const row of sheet.getElementsByTagName('row')) {
+        const ri = (parseInt(row.getAttribute('r')) || rows.length + 1) - 1, cells = [];
+        let ci = 0;
+        for (const c of row.getElementsByTagName('c')) {
+          const ref = c.getAttribute('r'), m = ref && /^([A-Z]+)/.exec(ref);
+          if (m) { let n = 0; for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; ci = n - 1; }
+          const t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0];
+          let val = '';
+          if (t === 's') val = v ? (ss[parseInt(v.textContent)] || '') : '';
+          else if (t === 'inlineStr') val = Array.from(c.getElementsByTagName('t')).map(x => x.textContent).join('');
+          else val = v ? v.textContent : '';
+          cells[ci] = val; ci++;
+        }
+        rows[ri] = Array.from(cells, x => x == null ? '' : x);
       }
-      rows[ri] = Array.from(out, x => x == null ? '' : x);
+      out.push({ name: it.name, rows: trimTail(Array.from(rows, r => r || [])) });
     }
-    return trimTail(Array.from(rows, r => r || []));
+    return out;
   }
+  async function parseXLSX(buf) { return (await parseXLSXSheets(buf))[0].rows; }
 
   /* ---------- Pengurai nilai ---------- */
   function parseAmt(s) {
@@ -418,5 +423,5 @@
   }
 
   window.imporModal = imporModal;
-  window.VelqoImpor = { parseCSV, parseXLSX, parseAmt, parseDateStr, detectOrder, autoMap, detectHeader, defaultOn, FIELDS, state: () => imp };
+  window.VelqoImpor = { parseCSV, parseXLSX, parseXLSXSheets, normH, colName, blank, addDays, lsGet, lsSet, parseAmt, parseDateStr, detectOrder, autoMap, detectHeader, defaultOn, FIELDS, state: () => imp };
 })();
