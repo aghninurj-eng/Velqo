@@ -53,6 +53,17 @@ Tombol **⬆ Impor dari Marketplace** di tab Penjualan membaca file ekspor pesan
 - Mengimpor ribuan pesanan sekaligus didukung (diuji 3.000 pesanan). Penyimpanan dikirim per 50 pesanan ke Spreadsheet, jadi butuh waktu; pantau teks "Menyimpan ... / ..." di tombol.
 - Tombol "Unduh template CSV" di jendela impor menyediakan format paling sederhana bila marketplace tidak menyediakan ekspor yang cocok.
 
+## Penerimaan dana massal marketplace
+
+Di tab **Penjualan** klik **⬇ Terima Dana Marketplace**, lalu pilih file penghasilan dari Seller Center (Shopee: Penghasilan, Sudah Dilepas; TikTok Shop: Finance, Pendapatan). Format `.xlsx` dan `.csv` dibaca di browser, lembar kerja dan kolom dikenali otomatis dan bisa diubah.
+
+- Tiap baris dicocokkan ke faktur hasil impor pesanan lewat nomor pesanan. Faktur harus sudah ada; pesanan tanpa faktur dilewati dan bisa dicatat setelah diimpor.
+- Tiap pesanan membuat satu jurnal: Dr Kas/Saldo marketplace sebesar dana cair, Dr beban per kelompok potongan (komisi, layanan, ongkir, voucher/iklan, pajak, lain), Cr Piutang sebesar sisa faktur. Faktur menjadi lunas.
+- Bila pendapatan di file berbeda dari faktur, selisih masuk akun "Selisih Penjualan Marketplace". Selisih besar ditandai **Periksa** dan tidak dipilih otomatis.
+- Pesanan retur/batal tanpa dana dan faktur yang sudah lunas dilewati. File yang sama aman diunggah ulang, tidak akan dobel.
+- Akun yang disarankan (1210 Saldo Shopee, 1220 Saldo TikTok Shop, 5610 sampai 5690) dibuat otomatis saat disimpan bila belum ada. Akun bisa diganti di pengaturan sebelum disimpan.
+- Disimpan per 40 pesanan. Perlu **Code.gs versi 5** agar faktur dan jurnal tersimpan bersamaan. Dengan versi lama tetap jalan tapi lebih lambat dan tidak seatomik itu. Perbarui seperti biasa: tempel Code.gs, lalu Deploy, Manage deployments, New version.
+
 ## Memperbarui Apps Script (wajib setelah fitur persediaan)
 
 Fitur persediaan menambah tiga sheet (`Produk`, `FakturItem`, `Stok`) dan satu aksi baru di backend. Biaya tambahan menambah satu sheet lagi (`FakturBiaya`, Code.gs versi 4), jadi pembaruan di bawah juga wajib untuk fitur biaya.
