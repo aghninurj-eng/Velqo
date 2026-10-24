@@ -53,6 +53,10 @@ Tombol **⬆ Impor dari Marketplace** di tab Penjualan membaca file ekspor pesan
 - Mengimpor ribuan pesanan sekaligus didukung (diuji 3.000 pesanan). Penyimpanan dikirim per 50 pesanan ke Spreadsheet, jadi butuh waktu; pantau teks "Menyimpan ... / ..." di tombol.
 - Tombol "Unduh template CSV" di jendela impor menyediakan format paling sederhana bila marketplace tidak menyediakan ekspor yang cocok.
 
+## Unduh laporan ke Excel
+
+Di halaman **Laporan**, pilih periode lalu klik **Unduh Excel**. Satu file `.xlsx` berisi lima lembar: Ringkasan, Laba Rugi, Neraca, Neraca Saldo, dan Buku Besar (semua akun yang bergerak, lengkap dengan saldo awal dan saldo akhir). Tampilannya sudah diformat: judul dan periode, header berwarna, angka berformat ribuan, baris total berupa rumus Excel, panel judul yang membeku, dan siap cetak A4. File dibuat di browser tanpa pustaka luar (`xlsx.js` dan `ekspor.js`).
+
 ## Catatan impor pesanan
 
 - Baris tanpa SKU dengan nilai Rp 0 (barang gratis/hadiah di pesanan Shopee) dilewati, tidak membuat pesanan gagal.

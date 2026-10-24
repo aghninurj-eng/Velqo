@@ -763,7 +763,7 @@ function pLaporan() {
   <div class="tabs">${tabs.map(([k, t]) => `<button data-tab="${k}" class="${st.tab === k ? 'on' : ''}">${t}</button>`).join('')}</div>
   <div class="bar">${st.tab === 'bukubesar' ? sel('bb', akunOpts(), st.bb, 'id="bb" style="width:auto"') : ''}
   ${needFrom ? `<label class="mut">Dari <input type="date" id="rf" value="${st.from}"></label>` : ''}<label class="mut">${needFrom ? 'Sampai' : 'Per tanggal'} <input type="date" id="rt" value="${st.to}"></label>
-  <span class="sp"></span><button id="csv">Unduh CSV</button><button id="prn">Cetak</button></div>
+  <span class="sp"></span><button class="pri" id="xls">Unduh Excel</button><button id="csv">Unduh CSV</button><button id="prn">Cetak</button></div>
   <div class="panel" style="padding:0">${body}</div>`;
 }
 function bindLaporan() {
@@ -772,6 +772,7 @@ function bindLaporan() {
   $('#rt').onchange = e => { st.to = e.target.value; render(); };
   if ($('#bb')) $('#bb').onchange = e => { st.bb = e.target.value; render(); };
   $('#prn').onclick = () => window.print();
+  $('#xls').onclick = () => (window.eksporExcel ? window.eksporExcel() : toast('Modul Excel belum termuat, muat ulang halaman', true));
   $('#csv').onclick = () => {
     const t = $('#rep'); if (!t) return;
     const csv = $$('tr', t).map(tr => $$('th,td', tr).map(c => '"' + c.textContent.replace(/"/g, '""') + '"').join(',')).join('\n');
