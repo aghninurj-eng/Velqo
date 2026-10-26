@@ -345,6 +345,7 @@ async function hapusFaktur(f) {
   await Store.remove('Faktur', 'id', f.id);
 }
 async function payFaktur(f, { tanggal, akun_kas, jumlah }) {
+  f = S.Faktur.find(x => x.id === f.id) || f; // data terbaru, bukan salinan lama dari saat dialog dibuka
   const sales = f.jenis === 'penjualan';
   if (jumlah <= 0 || jumlah > f.total - f.terbayar + 0.005) throw new Error('Jumlah melebihi sisa tagihan');
   const nomor = nextNo(sales ? 'RCV' : 'PAY', tanggal);
@@ -417,9 +418,14 @@ function toast(msg, err) {
   const el = document.createElement('div'); el.textContent = msg; if (err) el.className = 'err';
   $('#fin-toast').appendChild(el); setTimeout(() => el.remove(), err ? 6000 : 2600);
 }
+// Satu aksi simpan pada satu waktu: klik ganda atau klik saat Apps Script masih memproses tidak mengirim transaksi dua kali.
+let busy = false;
 async function run(fn, okMsg) {
+  if (busy) return;
+  busy = true; const btns = $$('#dfoot button'); btns.forEach(b => { b.disabled = true; });
   try { await fn(); if (okMsg) toast(okMsg); dlg.open && dlg.close(); render(); }
-  catch (e) { toast(e.message || String(e), true); }
+  catch (e) { toast(e.message || String(e), true); btns.forEach(b => { if (b.isConnected) b.disabled = false; }); }
+  finally { busy = false; }
 }
 const sel = (name, opts, val, attr = '') => `<select name="${name}" ${attr}>${opts.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 const akunOpts = (filter = () => true) => S.Akun.filter(filter).sort((a, b) => a.kode.localeCompare(b.kode)).map(a => [a.kode, a.kode + ' · ' + a.nama]);
@@ -637,6 +643,15 @@ function fakturDetail(id) {
   const payRows = S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY') && ![AK.piutang, AK.hutang].includes(j.kode_akun));
   const isKas = j => { const a = akunBy(j.kode_akun); return a && a.kategori === 'Kas & Bank'; };
   const pays = payRows.filter(isKas), potong = payRows.filter(j => !isKas(j)); // potongan marketplace dari penerimaan dana massal
+  // Jurnal pembayaran ganda (baris persis sama dalam satu nomor) yang membuat total kas melebihi yang tercatat terbayar
+  const jmlKas = pays.reduce((a, j) => a + (sales ? j.debit : j.kredit), 0), dupIds = [];
+  if (jmlKas > f.terbayar + 0.5) {
+    const seen = new Set();
+    S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY')).forEach(j => {
+      const k = [j.nomor, j.tanggal, j.kode_akun, j.debit, j.kredit].join('|') + '|' + (seen.has([j.nomor, j.tanggal, j.kode_akun, j.debit, j.kredit].join('|')) ? 'd' : 'o');
+      if (k.endsWith('|d')) dupIds.push(j.id); seen.add([j.nomor, j.tanggal, j.kode_akun, j.debit, j.kredit].join('|'));
+    });
+  }
   const its = S.FakturItem.filter(i => i.faktur_id === f.id), ast = S.Aset.filter(a => a.faktur_id === f.id);
   const bys = S.FakturBiaya.filter(b => b.faktur_id === f.id), biayaSum = bys.length ? bys.reduce((a, b) => a + b.jumlah, 0) : Math.max(0, f.total - f.subtotal - f.ppn);
   const hpp = -S.Stok.filter(x => x.ref === f.id && x.jenis === 'jual').reduce((a, x) => a + x.nilai, 0);
@@ -647,8 +662,10 @@ function fakturDetail(id) {
     ${ast.length ? `<table style="margin-bottom:10px"><tr><th>Aset tercatat</th><th>Kategori</th><th class="r">Harga perolehan</th></tr>${ast.map(a => `<tr><td>${esc(a.kode)} · ${esc(a.nama)}${a.jumlah !== 1 ? ' <span class="mut">×' + fq(a.jumlah) + '</span>' : ''}</td><td class="mut">${esc(akunNama(a.akun))}</td><td class="r">${rp(a.harga)}</td></tr>`).join('')}</table>` : ''}
     ${bys.length ? `<table style="margin-bottom:10px"><tr><th>Biaya tambahan</th><th>Dicatat sebagai</th><th class="r">Jumlah</th></tr>${bys.map(b => `<tr><td>${esc(b.nama)}</td><td class="mut">${b.akun === AK.persediaan ? 'Nilai persediaan' : esc(akunNama(b.akun))}</td><td class="r">${rp(b.jumlah)}</td></tr>`).join('')}</table>` : ''}
     <table><tr><td>Subtotal${biayaSum ? ' barang' : ''}</td><td class="r">${rp(f.subtotal)}</td></tr>${biayaSum ? `<tr><td>Biaya tambahan</td><td class="r">${rp(biayaSum)}</td></tr>` : ''}<tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr>${hpp > 0 ? `<tr><td class="mut">HPP (modal barang terjual)</td><td class="r mut">${rp(hpp)}</td></tr>` : ''}</table>
+    ${jmlKas > f.terbayar + 0.5 ? `<div class="note" style="margin-top:12px">Jurnal kas ${rp(jmlKas)} lebih besar dari jumlah terbayar ${rp(f.terbayar)}, selisih ${rp(jmlKas - f.terbayar)}. Kemungkinan ada pembayaran yang tersimpan dua kali.${dupIds.length ? ` <button class="sm dan" id="fixdup">Hapus ${dupIds.length} baris jurnal ganda</button>` : ' Periksa di Jurnal Umum.'}</div>` : ''}
     <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map(j => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}${potong.length ? `<h3 style="margin:14px 0 6px">Potongan marketplace</h3><table>${potong.map(j => `<tr><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit - j.kredit)}</td></tr>`).join('')}</table>` : ''}`,
     `${f.terbayar === 0 ? '<button class="dan" id="del" style="margin-right:auto">Hapus faktur</button>' : ''}<button data-close>Tutup</button>${sisa > 0.005 ? `<button class="pri" id="pay">${sales ? 'Terima pembayaran' : 'Bayar'}</button>` : ''}`);
+  if ($('#fixdup')) $('#fixdup').onclick = () => { if (confirm('Hapus ' + dupIds.length + ' baris jurnal yang persis sama dengan baris lain di nomor yang sama?')) run(async () => { for (const id of dupIds) await Store.remove('Jurnal', 'id', id); }, 'Jurnal ganda dihapus'); };
   if ($('#del')) $('#del').onclick = () => { if (confirm('Hapus faktur ' + f.nomor + ' beserta jurnalnya?')) run(() => hapusFaktur(f), 'Faktur dihapus'); };
   if ($('#pay')) $('#pay').onclick = () => {
     modal((sales ? 'Terima pembayaran ' : 'Bayar ') + f.nomor, `<form id="pf" class="f">

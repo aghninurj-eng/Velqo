@@ -116,3 +116,7 @@ Spasi atau baris baru di awal dan akhir token diabaikan otomatis.
 ## Tampilan tidak berubah setelah pembaruan
 
 Jika halaman di GitHub Pages terlihat masih versi lama setelah penggabungan, browser kemungkinan memakai cache. Tekan `Ctrl+Shift+R` (di HP: tutup tab lalu buka lagi). Setiap mengubah `keuangan.js` atau `keuangan.css`, naikkan angka `?v=` di `keuangan/index.html` agar cache otomatis diperbarui.
+
+## Pembayaran tercatat ganda
+
+Tombol Simpan sekarang hanya menerima satu klik sampai prosesnya selesai, jadi klik ganda tidak lagi mengirim transaksi dua kali. Bila ada pembayaran yang sudah terlanjur ganda, buka detail fakturnya: muncul catatan merah dengan tombol **Hapus baris jurnal ganda** (hanya muncul bila total kas di jurnal lebih besar dari jumlah terbayar).
