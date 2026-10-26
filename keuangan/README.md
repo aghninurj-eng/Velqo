@@ -117,6 +117,21 @@ Spasi atau baris baru di awal dan akhir token diabaikan otomatis.
 
 Jika halaman di GitHub Pages terlihat masih versi lama setelah penggabungan, browser kemungkinan memakai cache. Tekan `Ctrl+Shift+R` (di HP: tutup tab lalu buka lagi). Setiap mengubah `keuangan.js` atau `keuangan.css`, naikkan angka `?v=` di `keuangan/index.html` agar cache otomatis diperbarui.
 
+## Edit transaksi
+
+Transaksi yang salah input bisa diedit, bukan hanya dihapus:
+
+- **Faktur penjualan/pembelian/aset:** buka detail faktur, klik **Edit faktur**. Form terisi data lama (barang, biaya tambahan, aset, PPN). Faktur yang sudah ada pembayaran harus dihapus pembayarannya dulu (tombol **Hapus** di Riwayat), lalu diedit, lalu dibayar lagi.
+- **Pembayaran/penerimaan faktur:** di Riwayat, **Edit** untuk mengubah tanggal, rekening, atau jumlah, dan **Hapus** untuk membatalkan. Penerimaan massal marketplace hanya bisa dihapus lalu dicatat ulang dari Terima Dana Marketplace.
+- **Kas masuk/keluar/transfer:** tombol **Edit** di tab Kas & Bank.
+- **Jurnal manual:** tombol **Edit** di Jurnal Umum.
+
+Cara kerjanya: transaksi lama dan jurnalnya dihapus, yang baru dibuat dengan aturan yang sama seperti transaksi baru, semuanya dalam satu permintaan ke Apps Script (tidak ada kondisi setengah jadi). Nomor dipertahankan selama bulannya sama; bila tanggal pindah bulan, nomor dibuat baru. Penjaga: stok tidak boleh minus, aset yang sudah disusutkan tidak bisa diedit, dan HPP penjualan dihitung ulang dengan rata-rata stok saat ini.
+
+Setiap edit dan hapus tercatat di sheet **Log** (waktu, aksi, nomor, ringkasan perubahan) sebagai jejak audit. Fitur ini butuh **Code.gs versi 7**: tempel Code.gs, jalankan `setup()` (membuat sheet Log), lalu Deploy, Manage deployments, New version. Versi 7 juga membuat aplikasi tetap terbuka bila sheet tambahan seperti Aset atau Log belum ada.
+
+Belum bisa diedit: penyesuaian stok, jurnal penyusutan, dan faktur yang asetnya sudah disusutkan.
+
 ## Pembayaran tercatat ganda
 
 Tombol Simpan sekarang hanya menerima satu klik sampai prosesnya selesai, jadi klik ganda tidak lagi mengirim transaksi dua kali. Bila ada pembayaran yang sudah terlanjur ganda, buka detail fakturnya: muncul catatan merah dengan tombol **Hapus baris jurnal ganda** (hanya muncul bila total kas di jurnal lebih besar dari jumlah terbayar).

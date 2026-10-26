@@ -23,8 +23,11 @@ const SHEETS = {
   Stok:      ['id', 'tanggal', 'nomor', 'produk_id', 'jenis', 'qty', 'harga', 'nilai', 'keterangan', 'ref'],
   // Daftar aset tetap. harga = harga perolehan total (sudah termasuk biaya yang ditambahkan), akum = akumulasi penyusutan,
   // susut_sd = bulan terakhir yang sudah disusutkan (yyyy-mm), faktur_id = faktur pembelian asalnya.
+  // Jejak perubahan: setiap edit atau hapus transaksi dari aplikasi mencatat satu baris di sini.
+  Log:       ['id', 'waktu', 'aksi', 'nomor', 'detail'],
   Aset:      ['id', 'kode', 'nama', 'akun', 'tanggal', 'harga', 'nilai_sisa', 'umur_bulan', 'jumlah', 'akum', 'susut_sd', 'faktur_id', 'keterangan'],
 };
+const CORE = ['Akun', 'Jurnal', 'Faktur', 'KasBank'];
 const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah', 'qty', 'harga', 'nilai', 'stok_min', 'nilai_sisa', 'umur_bulan', 'akum'];
 const DECIMAL = ['qty', 'harga', 'stok_min'];
 
@@ -83,7 +86,10 @@ function doGet(e) {
     if (ae) return json_({ ok: false, error: ae });
     if (e.parameter.action === 'all') {
       const data = {};
-      Object.keys(SHEETS).forEach(function (n) { data[n] = read_(n); });
+      Object.keys(SHEETS).forEach(function (n) {
+        // Sheet tambahan (persediaan, aset, log) boleh belum ada: dilewati supaya aplikasi tetap jalan dan menawarkan pembaruan.
+        try { data[n] = read_(n); } catch (err) { if (CORE.indexOf(n) >= 0) throw err; }
+      });
       return json_({ ok: true, data: data });
     }
     return json_({ ok: true, pesan: 'API Keuangan aktif' });
@@ -108,6 +114,10 @@ function doPost(e) {
       for (let i = 0; i < ups.length; i++) if (!SHEETS[ups[i].sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal: ' + ups[i].sheet });
       const plan = ups.map(function (u) { return { u: u, row: findRow_(u.sheet, u.field, u.value) }; });
       plan.forEach(function (x) { if (x.row < 0) throw new Error('Data tidak ditemukan: ' + x.u.sheet + ' ' + x.u.value); });
+      // Penghapusan baris (mis. mengganti transaksi yang diedit) dijalankan lebih dulu, lalu tambah baris, lalu pembaruan.
+      const rms = b.removes || [];
+      for (let i = 0; i < rms.length; i++) if (!SHEETS[rms[i].sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal: ' + rms[i].sheet });
+      rms.forEach(function (r) { remove_(r.sheet, r.field, r.value); });
       ops.forEach(function (op) { append_(op.sheet, op.rows); });
       plan.forEach(function (x) { update_(x.u.sheet, x.u.field, x.u.value, x.u.patch); });
       return json_({ ok: true });
@@ -126,7 +136,7 @@ function doPost(e) {
 }
 
 // Naikkan angka ini setiap Code.gs diubah; halaman Keuangan memakainya untuk mendiagnosis deployment yang belum diperbarui.
-const VERSI = 6;
+const VERSI = 7;
 
 function token_() {
   const p = PropertiesService.getScriptProperties().getProperty('TOKEN');
