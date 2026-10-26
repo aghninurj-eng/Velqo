@@ -162,3 +162,17 @@
   .fin table.pv td.ptot { grid-column: 2; }
   .fin table.pv td.pst { grid-column: 1 / -1; }
 }
+
+/* Form aset tetap di faktur pembelian: tabel di layar lebar, kartu bertumpuk di layar sempit */
+.fin table.ast { table-layout: fixed; }
+.fin table.ast td { vertical-align: top; padding: 6px 6px; }
+.fin table.ast input, .fin table.ast select { width: 100%; min-width: 0; }
+@media (max-width: 700px) {
+  .fin table.ast, .fin table.ast tbody { display: block; width: 100%; }
+  .fin table.ast .hd { display: none; }
+  .fin table.ast tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .fin table.ast td { display: block; padding: 0; min-width: 0; border-bottom: 0; }
+  .fin table.ast td[data-l]::before { content: attr(data-l); display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .fin table.ast td:nth-child(1), .fin table.ast td:nth-child(2) { grid-column: 1 / -1; }
+  .fin table.ast td:last-child { justify-self: end; }
+}

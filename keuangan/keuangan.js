@@ -21,16 +21,16 @@ const MONTHS = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov
 /* ============ DATA ============ */
 const DEFAULT_COA = [
   ['1100','Kas','Aset','Kas & Bank'],['1200','Bank BCA','Aset','Kas & Bank'],['1300','Piutang Usaha','Aset','Piutang'],
-  ['1400','PPN Masukan','Aset','Pajak'],['1500','Persediaan Barang','Aset','Persediaan'],['1600','Peralatan Kantor','Aset','Aset Tetap'],
+  ['1400','PPN Masukan','Aset','Pajak'],['1500','Persediaan Barang','Aset','Persediaan'],['1600','Peralatan Kantor','Aset','Aset Tetap'],['1610','Kendaraan','Aset','Aset Tetap'],['1620','Komputer & Elektronik','Aset','Aset Tetap'],['1630','Furnitur & Perlengkapan Tetap','Aset','Aset Tetap'],['1690','Akumulasi Penyusutan','Aset','Akumulasi Penyusutan'],
   ['2100','Hutang Usaha','Kewajiban','Hutang'],['2200','PPN Keluaran','Kewajiban','Pajak'],['2300','Hutang Gaji','Kewajiban','Hutang Lain'],
   ['3100','Modal Pemilik','Ekuitas','Modal'],['3200','Prive','Ekuitas','Modal'],
   ['4100','Pendapatan Penjualan','Pendapatan','Pendapatan'],['4200','Pendapatan Lain-lain','Pendapatan','Pendapatan Lain'],
   ['5100','Harga Pokok Penjualan','Beban','HPP'],['5200','Beban Gaji','Beban','Beban Operasional'],['5300','Beban Sewa','Beban','Beban Operasional'],
-  ['5400','Beban Listrik, Air & Internet','Beban','Beban Operasional'],['5500','Beban Perlengkapan','Beban','Beban Operasional'],['5600','Beban Lain-lain','Beban','Beban Lain']
+  ['5400','Beban Listrik, Air & Internet','Beban','Beban Operasional'],['5500','Beban Perlengkapan','Beban','Beban Operasional'],['5600','Beban Lain-lain','Beban','Beban Lain'],['5700','Beban Penyusutan','Beban','Beban Operasional']
 ].map(([kode, nama, tipe, kategori]) => ({ kode, nama, tipe, kategori }));
 const AK = { piutang: '1300', ppnMasuk: '1400', persediaan: '1500', hutang: '2100', ppnKeluar: '2200', penjualan: '4100', pembelian: '5100', modal: '3100' };
-const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'], Produk: ['stok_min'], FakturItem: ['qty', 'harga', 'subtotal'], Stok: ['qty', 'harga', 'nilai'], FakturBiaya: ['jumlah'] };
-const SHEET_NAMES = ['Akun', 'Jurnal', 'Faktur', 'KasBank', 'Produk', 'FakturItem', 'Stok', 'FakturBiaya'];
+const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'], Produk: ['stok_min'], FakturItem: ['qty', 'harga', 'subtotal'], Stok: ['qty', 'harga', 'nilai'], FakturBiaya: ['jumlah'], Aset: ['harga', 'nilai_sisa', 'umur_bulan', 'jumlah', 'akum'] };
+const SHEET_NAMES = ['Akun', 'Jurnal', 'Faktur', 'KasBank', 'Produk', 'FakturItem', 'Stok', 'FakturBiaya', 'Aset'];
 const EPS = 0.00005;
 const rq = n => Math.round(num(n) * 10000) / 10000; // kuantitas dibulatkan 4 desimal agar tidak ada sisa pecahan
 const fq = n => rq(n).toLocaleString('id-ID', { maximumFractionDigits: 4 });
@@ -39,10 +39,10 @@ const DEBIT_NORMAL = { Aset: true, Beban: true };
 
 const saved = (() => { try { return JSON.parse(localStorage.getItem('velqo_cfg') || '{}'); } catch { return {}; } })();
 const API_URL = saved.url || CONFIG.API_URL, TOKEN = saved.token || CONFIG.TOKEN;
-let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [] };
+let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [], Aset: [] };
 
 // Versi Code.gs yang diharapkan halaman ini (lihat VERSI di Code.gs). Dipakai untuk menjelaskan galat token.
-const BACKEND_VERSI = 5;
+const BACKEND_VERSI = 6;
 function apiErr(j, fallback) {
   let m = (j && j.error) || fallback;
   if (/^Token salah/.test(m)) {
@@ -56,6 +56,7 @@ const Store = {
   live: !!API_URL,
   invReady: true, // false bila Code.gs di Apps Script belum diperbarui (belum punya sheet Produk/Stok)
   ver: 0, // versi Code.gs yang aktif (dikirim backend di setiap respons)
+  asetReady: true, // false bila belum punya sheet Aset (Code.gs versi 6)
   biayaReady: true, // false bila belum punya sheet FakturBiaya (Code.gs versi 4)
   async post(body) {
     const r = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, token: TOKEN }) });
@@ -71,10 +72,11 @@ const Store = {
       S = j.data; this.ver = j.v || 0;
       this.invReady = ['Produk', 'FakturItem', 'Stok'].every(k => Array.isArray(S[k]));
       this.biayaReady = Array.isArray(S.FakturBiaya);
+      this.asetReady = Array.isArray(S.Aset);
     } else {
       const raw = localStorage.getItem('velqo_demo');
       if (raw) S = JSON.parse(raw);
-      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [] }; await seedDemo(); }
+      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [], Aset: [] }; await seedDemo(); }
     }
     for (const k of SHEET_NAMES) S[k] = S[k] || [];
     for (const k in NUMF) S[k].forEach(r => NUMF[k].forEach(f => r[f] = num(r[f])));
@@ -219,7 +221,7 @@ const labaRugi = (from, to) => {
    kode akun beban = dicatat sebagai beban. PPN dihitung dari subtotal barang saja. */
 /* buildFaktur menyusun faktur beserta baris item, stok, dan jurnalnya TANPA menyimpan. `ctx` ({Jurnal, Stok, sm}) opsional:
    dipakai impor massal agar nomor dan stok memperhitungkan faktur sebelumnya yang belum tersimpan. */
-function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items, biaya }, ctx) {
+function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items, biaya, aset }, ctx) {
   const sales = jenis === 'penjualan';
   biaya = (biaya || []).filter(b => String(b.nama || '').trim() || num(b.jumlah)).map(b => ({ nama: String(b.nama || '').trim(), jumlah: Math.round(num(b.jumlah)), akun: String(b.akun || 'stok') }));
   if (biaya.length) {
@@ -232,6 +234,12 @@ function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, sub
   }
   const capTotal = biaya.filter(b => b.akun === 'stok').reduce((a, b) => a + b.jumlah, 0);
   items = (items || []).filter(i => i.produk_id && num(i.qty) > 0).map(i => ({ produk_id: i.produk_id, qty: rq(i.qty), harga: num(i.harga), sub: i.subtotal == null ? null : Math.round(num(i.subtotal)) }));
+  aset = (aset || []).filter(a => String(a.nama || '').trim() || num(a.harga));
+  if (aset.length) {
+    if (sales) throw new Error('Aset tetap hanya untuk faktur pembelian');
+    if (items.length) throw new Error('Satu faktur hanya berisi barang persediaan atau aset tetap, tidak keduanya');
+    needAset();
+  }
   const useItems = items.length > 0;
   let itemRows = [], stokRows = [], cogs = 0;
   const localStok = {};
@@ -263,20 +271,64 @@ function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, sub
       });
     }
   }
+  // Aset tetap: tiap baris menjadi satu catatan di daftar aset; biaya yang ditambahkan ke nilai dibagi proporsional ke nilai tiap baris.
+  let asetRows = [], akunNew = [];
+  if (aset.length) {
+    const L = aset.map(a => {
+      const nama = String(a.nama || '').trim(), jml = rq(a.jumlah || 1), hrg = num(a.harga), umur = Math.round(num(a.umur)), kode = String(a.akun || '');
+      if (!nama) throw new Error('Nama aset wajib diisi');
+      if (!(jml > 0)) throw new Error('Jumlah aset ' + nama + ' harus lebih dari nol');
+      if (!(hrg > 0)) throw new Error('Harga aset ' + nama + ' harus lebih dari nol');
+      if (!(umur >= 1 && umur <= 600)) throw new Error('Umur manfaat ' + nama + ' harus 1 sampai 600 bulan');
+      const ak = akunBy(kode), saran = ASET_SARAN.find(x => x[0] === kode);
+      if (!(ak ? isAsetAkun(ak) : saran)) throw new Error('Kategori aset untuk ' + nama + ' tidak valid');
+      return { nama, jml, umur, kode, sisa: Math.round(num(a.sisa)), sub: Math.round(jml * hrg) };
+    });
+    subtotal = L.reduce((x, r) => x + r.sub, 0);
+    akun = L[0].kode;
+    const W = subtotal; let left = capTotal; const ex = [];
+    asetRows = L.map((r, i) => {
+      const share = i === L.length - 1 ? left : Math.round(capTotal * r.sub / W); left -= share;
+      const harga = r.sub + share;
+      if (r.sisa < 0 || r.sisa >= harga) throw new Error('Nilai sisa ' + r.nama + ' harus kurang dari harga perolehan');
+      const row = { id: uid(), kode: asetKodeNext(ex), nama: r.nama, akun: r.kode, tanggal, harga, nilai_sisa: r.sisa, umur_bulan: r.umur, jumlah: r.jml, akum: 0, susut_sd: '', faktur_id: id, keterangan: pihak };
+      ex.push(row); return row;
+    });
+    akunNew = akunBaru(asetRows.map(r => { const sg = ASET_SARAN.find(x => x[0] === r.akun); return sg ? { kode: sg[0], nama: sg[1], tipe: 'Aset', kategori: 'Aset Tetap' } : { kode: r.akun }; }).filter(a => a.nama));
+  }
   const biayaTotal = biaya.reduce((a, b) => a + b.jumlah, 0);
   const ppnAmt = ppn ? Math.round(subtotal * 0.11) : 0, total = subtotal + biayaTotal + ppnAmt;
   const f = { id, jenis, nomor, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn: ppnAmt, total, terbayar: 0 };
   const biayaRows = biaya.map(b => ({ id: uid(), faktur_id: id, nama: b.nama, jumlah: b.jumlah, akun: b.akun === 'stok' ? akun : b.akun }));
   const biayaLines = biaya.filter(b => b.akun !== 'stok').map(b => ({ kode: b.akun, debit: b.jumlah, ket: 'Biaya ' + b.nama + ' - ' + pihak }));
   const capLine = capTotal ? [{ kode: akun, debit: capTotal, ket: 'Biaya ke nilai barang: ' + biaya.filter(b => b.akun === 'stok').map(b => b.nama).join(', ') + ' - ' + pihak }] : [];
+  const asetLines = []; asetRows.forEach(r => { const l = asetLines.find(x => x.kode === r.akun); if (l) l.debit += r.harga; else asetLines.push({ kode: r.akun, debit: r.harga, ket: 'Pembelian aset - ' + pihak }); });
   const lines = sales
     ? [{ kode: AK.piutang, debit: total }, { kode: akun, kredit: subtotal }, { kode: AK.ppnKeluar, kredit: ppnAmt }, { kode: AK.pembelian, debit: cogs }, { kode: AK.persediaan, kredit: cogs }]
-    : [{ kode: akun, debit: subtotal }, ...capLine, ...biayaLines, { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
+    : [...(asetLines.length ? asetLines : [{ kode: akun, debit: subtotal }, ...capLine]), ...biayaLines, { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
   const jr = jurnalRows({ tanggal, nomor, keterangan: (sales ? 'Penjualan ke ' : 'Pembelian dari ') + pihak + (keterangan ? ' - ' + keterangan : ''), sumber: sales ? 'INV' : 'BILL', ref: id, lines });
-  const rows = { Faktur: [f], FakturItem: itemRows, FakturBiaya: Store.biayaReady ? biayaRows : [], Stok: stokRows, Jurnal: jr };
+  const rows = { Akun: akunNew, Aset: asetRows, Faktur: [f], FakturItem: itemRows, FakturBiaya: Store.biayaReady ? biayaRows : [], Stok: stokRows, Jurnal: jr };
   if (ctx) { ctx.Jurnal.push(...jr); ctx.Stok.push(...stokRows); if (ctx.sm) Object.assign(ctx.sm, localStok); }
   return { f, rows };
 }
+/* ============ ASET TETAP ============
+   Pembelian aset (mode "Aset tetap" di faktur pembelian) mendebit akun kategori Aset Tetap dan mencatat satu baris di sheet Aset.
+   Penyusutan garis lurus bulanan (lihat aset.js): Dr 5700 Beban Penyusutan, Cr 1690 Akumulasi Penyusutan. */
+const ASET_SARAN = [['1600', 'Peralatan Kantor'], ['1610', 'Kendaraan'], ['1620', 'Komputer & Elektronik'], ['1630', 'Furnitur & Perlengkapan Tetap']];
+const AK_AKUM = { kode: '1690', nama: 'Akumulasi Penyusutan', tipe: 'Aset', kategori: 'Akumulasi Penyusutan' };
+const AK_SUSUT = { kode: '5700', nama: 'Beban Penyusutan', tipe: 'Beban', kategori: 'Beban Operasional' };
+const isAsetAkun = a => a.tipe === 'Aset' && a.kategori === 'Aset Tetap';
+// Akun kategori aset: yang sudah ada, ditambah saran yang belum dibuat (dibuat otomatis saat faktur disimpan).
+function asetAkunOpts() {
+  const ada = S.Akun.filter(isAsetAkun).sort((a, b) => a.kode.localeCompare(b.kode)).map(a => [a.kode, a.kode + ' · ' + a.nama]);
+  const baru = ASET_SARAN.filter(([k]) => !S.Akun.some(a => a.kode === k)).map(([k, n]) => [k, k + ' · ' + n + ' (akan dibuat)']);
+  return [...ada, ...baru].sort((a, b) => a[0].localeCompare(b[0]));
+}
+// Akun yang masih harus dibuat agar jurnal valid: [{kode,nama,tipe,kategori}]
+const akunBaru = list => list.filter(a => !akunBy(a.kode)).filter((a, i, arr) => arr.findIndex(x => x.kode === a.kode) === i);
+const asetKodeNext = (extra = []) => 'AST-' + String(Math.max(0, ...S.Aset.concat(extra).map(a => parseInt(String(a.kode).replace(/\D/g, '')) || 0)) + 1).padStart(4, '0');
+const needAset = () => { if (!Store.asetReady) throw new Error('Fitur aset belum aktif di Spreadsheet. Perbarui Code.gs di Apps Script (versi 6), jalankan setup(), lalu deploy versi baru.'); };
+
 async function createFaktur(args) {
   const { f, rows } = buildFaktur(args);
   await Store.appendMany(rows);
@@ -285,9 +337,11 @@ async function createFaktur(args) {
 async function hapusFaktur(f) {
   if (f.terbayar > 0) throw new Error('Faktur sudah ada pembayaran');
   cekStokSetelahHapus(f.id);
+  if (Store.asetReady && S.Aset.some(a => a.faktur_id === f.id && (a.akum > 0 || a.susut_sd))) throw new Error('Aset dari faktur ini sudah disusutkan, faktur tidak bisa dihapus');
   await Store.remove('Jurnal', 'ref', f.id);
   if (Store.invReady) { await Store.remove('FakturItem', 'faktur_id', f.id); await Store.remove('Stok', 'ref', f.id); }
   if (Store.biayaReady && S.FakturBiaya.some(b => b.faktur_id === f.id)) await Store.remove('FakturBiaya', 'faktur_id', f.id);
+  if (Store.asetReady && S.Aset.some(a => a.faktur_id === f.id)) await Store.remove('Aset', 'faktur_id', f.id);
   await Store.remove('Faktur', 'id', f.id);
 }
 async function payFaktur(f, { tanggal, akun_kas, jumlah }) {
@@ -463,11 +517,19 @@ function fakturForm(jenis) {
   const due = new Date(); due.setDate(due.getDate() + 14);
   const canInv = Store.invReady, hasProd = canInv && S.Produk.length > 0;
   const showBiaya = !sales;
-  const biayaOpts = [['stok', 'Tambah ke nilai barang'], ...akunOpts(a => a.tipe === 'Beban' && a.kode !== AK.pembelian).map(([k, t]) => [k, 'Beban: ' + t])];
+  const canAset = !sales && Store.asetReady, asetKat = asetAkunOpts();
+  const biayaOpts = [['stok', 'Tambah ke nilai barang / aset'], ...akunOpts(a => a.tipe === 'Beban' && a.kode !== AK.pembelian).map(([k, t]) => [k, 'Beban: ' + t])];
   const biayaRow = () => `<tr><td data-l="Nama biaya"><input name="bnama" list="bnm" placeholder="mis. Ongkir"></td>
     <td data-l="Jumlah"><input type="number" name="bjumlah" min="0" step="any" class="r" placeholder="0"></td>
     <td data-l="Dicatat sebagai">${sel('bakun', biayaOpts, 'stok')}</td>
     <td><button type="button" class="sm" data-rmb aria-label="Hapus biaya">×</button></td></tr>`;
+  const asetRow = () => `<tr><td data-l="Nama aset"><input name="anama" placeholder="mis. Laptop Lenovo"></td>
+    <td data-l="Kategori">${sel('akat', asetKat, asetKat.some(x => x[0] === '1620') ? '1620' : asetKat[0] && asetKat[0][0])}</td>
+    <td data-l="Jumlah"><input type="number" name="ajml" min="0" step="any" class="r" value="1"></td>
+    <td data-l="Harga satuan"><input type="number" name="aharga" min="0" step="any" class="r" placeholder="0"></td>
+    <td data-l="Umur (bulan)"><input type="number" name="aumur" min="1" max="600" step="1" class="r" value="48"></td>
+    <td data-l="Nilai sisa (total)"><input type="number" name="asisa" min="0" step="any" class="r" value="0"></td>
+    <td><button type="button" class="sm" data-rma aria-label="Hapus aset">×</button></td></tr>`;
   const prodOpts = [['', '— pilih produk —'], ...S.Produk.slice().sort((x, y) => x.kode.localeCompare(y.kode)).map(p => [p.id, p.kode + ' · ' + p.nama + ' (' + p.satuan + ')'])];
   const row = () => `<tr><td data-l="Produk">${sel('produk_id', prodOpts, '')}<div class="mut stk"></div></td>
     <td data-l="Qty"><input type="number" name="qty" min="0" step="any" class="r" placeholder="0"></td>
@@ -478,14 +540,20 @@ function fakturForm(jenis) {
     <div><label>Jatuh tempo</label><input type="date" name="jatuh_tempo" value="${ymd(due)}" required></div>
     <div class="full"><label>${sales ? 'Pelanggan' : 'Pemasok'}</label><input name="pihak" required></div>
     <div class="full"><label>Keterangan</label><input name="keterangan"></div>
-    ${canInv ? `<div class="full"><label>Isi faktur</label><select name="mode" id="mode">
-      <option value="items" ${hasProd ? 'selected' : ''}>Barang persediaan (${sales ? 'stok berkurang, HPP otomatis' : 'stok bertambah'})</option>
-      <option value="manual" ${hasProd ? '' : 'selected'}>Tanpa produk (jasa / lainnya)</option></select></div>` : `<div class="full note">Rincian barang belum aktif karena Code.gs di Apps Script belum diperbarui. Faktur tetap bisa dibuat dengan subtotal manual.</div><input type="hidden" name="mode" id="mode" value="manual">`}
+    <div class="full"><label>Isi faktur</label><select name="mode" id="mode">
+      ${canInv ? `<option value="items" ${hasProd ? 'selected' : ''}>Barang persediaan (${sales ? 'stok berkurang, HPP otomatis' : 'stok bertambah'})</option>` : ''}
+      <option value="manual" ${hasProd && canInv ? '' : 'selected'}>Tanpa produk (jasa / lainnya)</option>
+      ${canAset ? '<option value="aset">Aset tetap (peralatan, komputer, kendaraan, dll.)</option>' : ''}</select>
+      ${canInv ? '' : '<div class="note" style="margin-top:6px">Rincian barang belum aktif karena Code.gs di Apps Script belum diperbarui. Faktur tetap bisa dibuat dengan subtotal manual.</div>'}</div>
     <div class="full" id="blkItems">
       ${hasProd ? `<table class="itm"><tr class="hd"><th>Produk</th><th class="r" style="width:90px">Qty</th><th class="r" style="width:130px">Harga satuan</th><th class="r" style="width:120px">Subtotal</th><th style="width:34px"></th></tr>${row()}${row()}</table>
       <div class="bar" style="margin-top:8px"><button type="button" id="addrow">+ Baris</button></div>`
         : `<div class="note">Belum ada produk. Tambahkan dulu di tab <a href="#persediaan" data-close>Persediaan</a>, atau pilih "Tanpa produk".</div>`}
     </div>
+    ${canAset ? `<div class="full" id="blkAset" style="display:none">
+      <table class="ast"><tr class="hd"><th>Nama aset</th><th style="width:170px">Kategori</th><th class="r" style="width:70px">Jumlah</th><th class="r" style="width:120px">Harga satuan</th><th class="r" style="width:80px">Umur (bln)</th><th class="r" style="width:110px">Nilai sisa</th><th style="width:34px"></th></tr>${asetRow()}</table>
+      <div class="bar" style="margin-top:8px"><button type="button" id="addaset">+ Aset</button><span class="mut">Setiap baris masuk ke tab Aset. Disusutkan garis lurus per bulan mulai bulan berikutnya. Umur 48 bulan = 4 tahun.</span></div>
+    </div>` : ''}
     <div class="full f" id="blkManual" style="padding:0">
       <div class="full"><label>${sales ? 'Akun pendapatan' : 'Akun pembelian / beban'}</label>${sel('akun', akunOpts(a => sales ? a.tipe === 'Pendapatan' : a.tipe === 'Beban' || a.kategori === 'Persediaan'), sales ? AK.penjualan : AK.pembelian)}</div>
       <div><label>Subtotal (Rp)</label><input type="number" name="subtotal" min="0" step="any"></div>
@@ -501,12 +569,15 @@ function fakturForm(jenis) {
     <div class="full mut" id="tot"></div></form>`,
     `<button data-close>Batal</button><button class="pri" id="ok">Simpan</button>`, true);
   const items = () => $$('#ff .itm tr').slice(1).map(tr => ({ tr, produk_id: $('[name=produk_id]', tr).value, qty: num($('[name=qty]', tr).value), harga: num($('[name=harga]', tr).value) }));
+  const asetRows = () => $$('#ff .ast tr').slice(1).map(tr => ({ tr, nama: $('[name=anama]', tr).value.trim(), akun: $('[name=akat]', tr).value, jumlah: num($('[name=ajml]', tr).value), harga: num($('[name=aharga]', tr).value), umur: num($('[name=aumur]', tr).value), sisa: num($('[name=asisa]', tr).value) }));
   const biayaRows = () => $$('#ff .bia tr').slice(1).map(tr => ({ tr, nama: $('[name=bnama]', tr).value.trim(), jumlah: num($('[name=bjumlah]', tr).value), akun: $('[name=bakun]', tr).value }));
   const upd = () => {
-    const f = $('#ff'), manual = f.elements.mode.value === 'manual';
-    $('#blkItems').style.display = manual ? 'none' : ''; $('#blkManual').style.display = manual ? '' : 'none';
+    const f = $('#ff'), md = f.elements.mode.value, manual = md === 'manual', asetMode = md === 'aset';
+    $('#blkItems').style.display = md === 'items' ? '' : 'none'; $('#blkManual').style.display = manual ? '' : 'none';
+    if ($('#blkAset')) $('#blkAset').style.display = asetMode ? '' : 'none';
     let sub = 0;
     if (manual) sub = num(f.elements.subtotal.value);
+    else if (asetMode) sub = asetRows().reduce((a, r) => a + Math.round(r.jumlah * r.harga), 0);
     else {
       const m = stokMap();
       items().forEach(({ tr, produk_id, qty, harga }) => {
@@ -524,16 +595,28 @@ function fakturForm(jenis) {
     $('#tot').textContent = 'Total: ' + rp(sub + bt + pp) + (parts.length > 1 ? ' (' + parts.join(' + ') + ')' : '');
   };
   $('#ff').oninput = upd; $('#ff').onchange = upd; upd();
+  if ($('#addaset')) $('#addaset').onclick = () => { $('#ff .ast').insertAdjacentHTML('beforeend', asetRow()); };
   if ($('#addrow')) $('#addrow').onclick = () => { $('#ff .itm').insertAdjacentHTML('beforeend', row()); };
   if ($('#addbiaya')) $('#addbiaya').onclick = () => { $('#tbBiaya').style.display = ''; $('#tbBiaya').insertAdjacentHTML('beforeend', biayaRow()); upd(); };
   $('#ff').onclick = e => {
     if (e.target.dataset.rm !== undefined && $$('#ff .itm tr').length > 2) { e.target.closest('tr').remove(); upd(); }
+    if (e.target.dataset.rma !== undefined && $$('#ff .ast tr').length > 2) { e.target.closest('tr').remove(); upd(); }
     if (e.target.dataset.rmb !== undefined) { e.target.closest('tr').remove(); if (!$$('#ff .bia tr')[1]) $('#tbBiaya').style.display = 'none'; upd(); }
   };
   $$('#blkItems a[data-close]').forEach(a => a.onclick = () => dlg.close());
   $('#ok').onclick = () => {
     const f = $('#ff'); if (!f.reportValidity()) return;
     const v = Object.fromEntries(new FormData(f)), manual = v.mode === 'manual';
+    if (v.mode === 'aset') {
+      const ar = asetRows().filter(r => r.nama || r.harga);
+      if (!ar.length) return toast('Isi minimal satu aset', true);
+      if (ar.some(r => !r.nama || r.harga <= 0 || r.jumlah <= 0 || r.umur < 1)) return toast('Lengkapi nama, jumlah, harga, dan umur di setiap baris aset', true);
+      const bs = biayaRows().filter(r => r.nama || r.jumlah);
+      if (bs.some(r => !r.nama || r.jumlah <= 0)) return toast('Lengkapi nama dan jumlah di setiap baris biaya', true);
+      const b0 = { jenis, tanggal: v.tanggal, jatuh_tempo: v.jatuh_tempo, pihak: v.pihak.trim(), keterangan: v.keterangan.trim(), ppn: !!v.ppn };
+      if (bs.length) b0.biaya = bs.map(r => ({ nama: r.nama, jumlah: r.jumlah, akun: r.akun }));
+      return run(() => createFaktur({ ...b0, aset: ar.map(r => ({ nama: r.nama, akun: r.akun, jumlah: r.jumlah, harga: r.harga, umur: r.umur, sisa: r.sisa })) }), 'Faktur dan aset tersimpan');
+    }
     const base = { jenis, tanggal: v.tanggal, jatuh_tempo: v.jatuh_tempo, pihak: v.pihak.trim(), keterangan: v.keterangan.trim(), ppn: !!v.ppn };
     const biaya = biayaRows().filter(r => r.nama || r.jumlah);
     if (biaya.some(r => !r.nama || r.jumlah <= 0)) return toast('Lengkapi nama dan jumlah di setiap baris biaya', true);
@@ -554,13 +637,14 @@ function fakturDetail(id) {
   const payRows = S.Jurnal.filter(j => j.ref === f.id && (j.sumber === 'RCV' || j.sumber === 'PAY') && ![AK.piutang, AK.hutang].includes(j.kode_akun));
   const isKas = j => { const a = akunBy(j.kode_akun); return a && a.kategori === 'Kas & Bank'; };
   const pays = payRows.filter(isKas), potong = payRows.filter(j => !isKas(j)); // potongan marketplace dari penerimaan dana massal
-  const its = S.FakturItem.filter(i => i.faktur_id === f.id);
+  const its = S.FakturItem.filter(i => i.faktur_id === f.id), ast = S.Aset.filter(a => a.faktur_id === f.id);
   const bys = S.FakturBiaya.filter(b => b.faktur_id === f.id), biayaSum = bys.length ? bys.reduce((a, b) => a + b.jumlah, 0) : Math.max(0, f.total - f.subtotal - f.ppn);
   const hpp = -S.Stok.filter(x => x.ref === f.id && x.jenis === 'jual').reduce((a, x) => a + x.nilai, 0);
   modal(f.nomor, `<div class="f" style="margin-bottom:12px">
     <div><div class="mut">${sales ? 'Pelanggan' : 'Pemasok'}</div>${esc(f.pihak)}</div><div><div class="mut">Status</div><span class="tag ${c}">${t}</span></div>
     <div><div class="mut">Tanggal / Jatuh tempo</div>${tgl(f.tanggal)} / ${tgl(f.jatuh_tempo)}</div><div><div class="mut">Keterangan</div>${esc(f.keterangan) || '-'}</div></div>
     ${its.length ? `<table style="margin-bottom:10px"><tr><th>Produk</th><th class="r">Qty</th><th class="r">Harga satuan</th><th class="r">Subtotal</th></tr>${its.map(i => { const pr = produkBy(i.produk_id); return `<tr><td>${esc(produkNama(i.produk_id))}</td><td class="r">${fq(i.qty)} ${esc(pr ? pr.satuan : '')}</td><td class="r">${rp(i.harga)}</td><td class="r">${rp(i.subtotal)}</td></tr>`; }).join('')}</table>` : ''}
+    ${ast.length ? `<table style="margin-bottom:10px"><tr><th>Aset tercatat</th><th>Kategori</th><th class="r">Harga perolehan</th></tr>${ast.map(a => `<tr><td>${esc(a.kode)} · ${esc(a.nama)}${a.jumlah !== 1 ? ' <span class="mut">×' + fq(a.jumlah) + '</span>' : ''}</td><td class="mut">${esc(akunNama(a.akun))}</td><td class="r">${rp(a.harga)}</td></tr>`).join('')}</table>` : ''}
     ${bys.length ? `<table style="margin-bottom:10px"><tr><th>Biaya tambahan</th><th>Dicatat sebagai</th><th class="r">Jumlah</th></tr>${bys.map(b => `<tr><td>${esc(b.nama)}</td><td class="mut">${b.akun === AK.persediaan ? 'Nilai persediaan' : esc(akunNama(b.akun))}</td><td class="r">${rp(b.jumlah)}</td></tr>`).join('')}</table>` : ''}
     <table><tr><td>Subtotal${biayaSum ? ' barang' : ''}</td><td class="r">${rp(f.subtotal)}</td></tr>${biayaSum ? `<tr><td>Biaya tambahan</td><td class="r">${rp(biayaSum)}</td></tr>` : ''}<tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr>${hpp > 0 ? `<tr><td class="mut">HPP (modal barang terjual)</td><td class="r mut">${rp(hpp)}</td></tr>` : ''}</table>
     <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map(j => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}${potong.length ? `<h3 style="margin:14px 0 6px">Potongan marketplace</h3><table>${potong.map(j => `<tr><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit - j.kredit)}</td></tr>`).join('')}</table>` : ''}`,
@@ -804,6 +888,7 @@ const pages = {
   penjualan: [() => pFaktur('penjualan'), () => bindFaktur('penjualan')],
   pembelian: [() => pFaktur('pembelian'), () => bindFaktur('pembelian')],
   persediaan: [pPersediaan, bindPersediaan],
+  aset: [() => (window.pAset ? window.pAset() : '<div class="note">Modul aset belum termuat, muat ulang halaman.</div>'), () => window.bindAset && window.bindAset()],
   akun: [pAkun, bindAkun],
   jurnal: [pJurnal, bindJurnal],
   laporan: [pLaporan, bindLaporan],
