@@ -21,8 +21,11 @@ const SHEETS = {
   // Biaya tambahan faktur pembelian (ongkir, admin, dll). akun = 1500 bila ditambahkan ke nilai persediaan, atau kode akun beban.
   FakturBiaya:['id', 'faktur_id', 'nama', 'jumlah', 'akun'],
   Stok:      ['id', 'tanggal', 'nomor', 'produk_id', 'jenis', 'qty', 'harga', 'nilai', 'keterangan', 'ref'],
+  // Daftar aset tetap. harga = harga perolehan total (sudah termasuk biaya yang ditambahkan), akum = akumulasi penyusutan,
+  // susut_sd = bulan terakhir yang sudah disusutkan (yyyy-mm), faktur_id = faktur pembelian asalnya.
+  Aset:      ['id', 'kode', 'nama', 'akun', 'tanggal', 'harga', 'nilai_sisa', 'umur_bulan', 'jumlah', 'akum', 'susut_sd', 'faktur_id', 'keterangan'],
 };
-const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah', 'qty', 'harga', 'nilai', 'stok_min'];
+const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah', 'qty', 'harga', 'nilai', 'stok_min', 'nilai_sisa', 'umur_bulan', 'akum'];
 const DECIMAL = ['qty', 'harga', 'stok_min'];
 
 const COA = [
@@ -32,6 +35,10 @@ const COA = [
   ['1400', 'PPN Masukan', 'Aset', 'Pajak'],
   ['1500', 'Persediaan Barang', 'Aset', 'Persediaan'],
   ['1600', 'Peralatan Kantor', 'Aset', 'Aset Tetap'],
+  ['1610', 'Kendaraan', 'Aset', 'Aset Tetap'],
+  ['1620', 'Komputer & Elektronik', 'Aset', 'Aset Tetap'],
+  ['1630', 'Furnitur & Perlengkapan Tetap', 'Aset', 'Aset Tetap'],
+  ['1690', 'Akumulasi Penyusutan', 'Aset', 'Akumulasi Penyusutan'],
   ['2100', 'Hutang Usaha', 'Kewajiban', 'Hutang'],
   ['2200', 'PPN Keluaran', 'Kewajiban', 'Pajak'],
   ['2300', 'Hutang Gaji', 'Kewajiban', 'Hutang Lain'],
@@ -45,6 +52,7 @@ const COA = [
   ['5400', 'Beban Listrik, Air & Internet', 'Beban', 'Beban Operasional'],
   ['5500', 'Beban Perlengkapan', 'Beban', 'Beban Operasional'],
   ['5600', 'Beban Lain-lain', 'Beban', 'Beban Lain'],
+  ['5700', 'Beban Penyusutan', 'Beban', 'Beban Operasional'],
 ];
 
 /** Jalankan SEKALI dari editor: membuat sheet, header, format teks, dan daftar akun awal. */
@@ -118,7 +126,7 @@ function doPost(e) {
 }
 
 // Naikkan angka ini setiap Code.gs diubah; halaman Keuangan memakainya untuk mendiagnosis deployment yang belum diperbarui.
-const VERSI = 5;
+const VERSI = 6;
 
 function token_() {
   const p = PropertiesService.getScriptProperties().getProperty('TOKEN');

@@ -53,6 +53,18 @@ Tombol **⬆ Impor dari Marketplace** di tab Penjualan membaca file ekspor pesan
 - Mengimpor ribuan pesanan sekaligus didukung (diuji 3.000 pesanan). Penyimpanan dikirim per 50 pesanan ke Spreadsheet, jadi butuh waktu; pantau teks "Menyimpan ... / ..." di tombol.
 - Tombol "Unduh template CSV" di jendela impor menyediakan format paling sederhana bila marketplace tidak menyediakan ekspor yang cocok.
 
+## Aset tetap dan penyusutan
+
+**Beli aset:** di tab **Pembelian**, buat faktur baru dan pilih **Isi faktur: Aset tetap**. Isi nama aset, kategori (Peralatan Kantor, Kendaraan, Komputer & Elektronik, Furnitur & Perlengkapan Tetap), jumlah, harga satuan, umur manfaat dalam bulan, dan nilai sisa. Setiap baris otomatis masuk ke tab **Aset**. Jurnalnya Dr akun aset, Dr PPN Masukan (bila ada), Cr Hutang Usaha. Biaya tambahan seperti ongkir dan instalasi yang dicatat "Tambah ke nilai barang / aset" dibagi proporsional ke harga perolehan tiap aset. Pembayarannya sama seperti pembelian biasa (Bayar di detail faktur), jadi bisa tunai maupun hutang.
+
+**Tab Aset:** daftar aset beserta harga perolehan, akumulasi penyusutan, dan nilai buku. Klik baris untuk melihat rincian dan faktur asalnya.
+
+**Penyusutan:** garis lurus per bulan, (harga perolehan - nilai sisa) / umur bulan, mulai **bulan setelah** tanggal perolehan. Klik **Catat penyusutan**, pilih sampai bulan berapa, periksa pratinjau, lalu catat. Dibuat satu jurnal per bulan (Dr 5700 Beban Penyusutan, Cr 1690 Akumulasi Penyusutan). Bulan yang sudah dicatat dilewati, jadi aman diulang. Faktur pembelian aset yang sudah disusutkan tidak bisa dihapus.
+
+Akun 1610, 1620, 1630, 1690, dan 5700 dibuat otomatis saat pertama dipakai bila belum ada. Fitur ini butuh **Code.gs versi 6** (sheet baru `Aset`): tempel Code.gs, jalankan `setup()`, lalu Deploy, Manage deployments, New version.
+
+Belum tercakup: penjualan atau pelepasan aset, dan aset yang sudah dimiliki sebelum memakai aplikasi ini (saldo awal). Selisih antara saldo akun aset tetap di Neraca dan daftar aset ditampilkan sebagai catatan di tab Aset.
+
 ## Unduh laporan ke Excel
 
 Di halaman **Laporan**, pilih periode lalu klik **Unduh Excel**. Satu file `.xlsx` berisi lima lembar: Ringkasan, Laba Rugi, Neraca, Neraca Saldo, dan Buku Besar (semua akun yang bergerak, lengkap dengan saldo awal dan saldo akhir). Tampilannya sudah diformat: judul dan periode, header berwarna, angka berformat ribuan, baris total berupa rumus Excel, panel judul yang membeku, dan siap cetak A4. File dibuat di browser tanpa pustaka luar (`xlsx.js` dan `ekspor.js`).
