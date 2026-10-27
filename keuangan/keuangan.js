@@ -93,7 +93,7 @@ const Store = {
   async appendMany(map, updates = [], removes = []) {
     const ops = Object.entries(map).filter(([, rows]) => rows.length).map(([sheet, rows]) => ({ sheet, rows }));
     if (this.live && (ops.length || updates.length || removes.length)) {
-      if (removes.length && this.ver < 7) throw new Error('Mengedit transaksi butuh Code.gs versi 7. Tempel Code.gs terbaru di Apps Script, jalankan setup(), lalu Deploy → Manage deployments → New version.');
+      if (removes.length && this.ver < 7) throw new Error('Mengedit transaksi butuh Code.gs versi 7, sedangkan Web App yang aktif ' + (Store.ver ? 'versi ' + Store.ver : 'versi lama') + '. Di Apps Script: Deploy → Manage deployments → ikon pensil → Version: New version → Deploy (URL /exec harus tetap yang sama dengan di Pengaturan), lalu muat ulang halaman dengan Ctrl+Shift+R.');
       if (this.ver >= 5) await this.post({ action: 'multi', ops, updates, removes });
       else {
         if (this.invReady && !updates.length) await this.post({ action: 'multi', ops });
@@ -918,6 +918,7 @@ function bindLaporan() {
 function pPengaturan() {
   return `<h2>Pengaturan</h2><p class="fin-sub">Sambungan database Google Spreadsheet</p>
   <div class="panel"><h3>Mode saat ini: ${Store.live ? 'Google Spreadsheet' : 'Demo (data hanya di browser ini)'}</h3>
+  ${Store.live ? `<p class="${Store.ver >= BACKEND_VERSI ? 'ok' : 'bad'}" style="margin:0 0 8px">Versi Code.gs yang aktif: <b>${Store.ver || 'lama (tidak terdeteksi)'}</b> dari yang terbaru ${BACKEND_VERSI}${Store.ver >= BACKEND_VERSI ? ' ✓' : '. Perbarui: tempel Code.gs terbaru, Deploy → Manage deployments → ikon pensil → New version → Deploy.'}</p>` : ''}
   ${Store.live ? '' : '<div class="note">Anda sedang memakai data contoh yang tersimpan di browser. Isi URL Web App dan token di bawah untuk memakai Google Spreadsheet.</div>'}
   <form id="cf" class="f"><div class="full"><label>URL Web App Apps Script (berakhiran /exec)</label><input name="url" value="${esc(saved.url || CONFIG.API_URL)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
   <div class="full"><label>Token (sama dengan TOKEN di Code.gs)</label><input name="token" type="password" value="${esc(saved.token || CONFIG.TOKEN)}" autocomplete="off"></div></form>

@@ -13,7 +13,7 @@
 */
 (function () {
   'use strict';
-  const needEdit = () => { if (Store.live && Store.ver < 7) throw new Error('Mengedit transaksi butuh Code.gs versi 7. Tempel Code.gs terbaru di Apps Script, jalankan setup(), lalu Deploy → Manage deployments → New version.'); };
+  const needEdit = () => { if (Store.live && Store.ver < 7) throw new Error('Mengedit transaksi butuh Code.gs versi 7, sedangkan Web App yang aktif ' + (Store.ver ? 'versi ' + Store.ver : 'versi lama') + '. Di Apps Script: Deploy → Manage deployments → ikon pensil → Version: New version → Deploy (URL /exec harus tetap yang sama dengan di Pengaturan), lalu muat ulang halaman dengan Ctrl+Shift+R.'); };
   const sameMonth = (a, b) => a.slice(0, 7) === b.slice(0, 7);
   const rm = (sheet, field, value) => ({ sheet, field, value });
   const withLog = (map, aksi, nomor, detail) => { const l = logRow(aksi, nomor, detail); if (l) map.Log = [l]; return map; };
