@@ -1,7 +1,7 @@
 
 /* ============ KONFIGURASI ============
    Bisa diisi di sini, atau lewat halaman Pengaturan (disimpan di browser). */
-const CONFIG = { API_URL: '', TOKEN: '' };
+const CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbyJ3O0U9uwZ3rYZC1UQrn6gmvhCY3WHGW_NmKFbpMfg5Noh6M1lrZJ3D1TXwvnP_G7IWg/exec', TOKEN: 'admin123' };
 
 /* ============ UTIL ============ */
 const $ = (s, el = document) => el.querySelector(s);
