@@ -41,7 +41,9 @@
     const nomor = sameMonth(cur[0].tanggal, tanggal) ? nomorLama : nextNo('JU', tanggal);
     const jr = jurnalRows({ tanggal, nomor, keterangan, sumber: 'JU', lines });
     const map = withLog({ Jurnal: jr }, 'edit jurnal', nomor, `${cur[0].keterangan} ${rp(cur.reduce((a, j) => a + j.debit, 0))} → ${keterangan} ${rp(jr.reduce((a, j) => a + j.debit, 0))}`);
-    await Store.appendMany(map, [], [rm('Jurnal', 'nomor', nomorLama)]);
+    // Bukti yang menempel pada nomor jurnal lama dipindah ke nomor baru (nomor berubah bila bulan berpindah)
+    const ups = nomor === nomorLama ? [] : (S.Dokumen || []).filter(d => d.tipe === 'jurnal' && d.ref_id === nomorLama).map(d => ({ sheet: 'Dokumen', field: 'id', value: d.id, patch: { ref_id: nomor } }));
+    await Store.appendMany(map, ups, [rm('Jurnal', 'nomor', nomorLama)]);
   }
 
   /* ---------- Pembayaran / penerimaan faktur ---------- */

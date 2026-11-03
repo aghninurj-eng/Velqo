@@ -29,8 +29,8 @@ const DEFAULT_COA = [
   ['5400','Beban Listrik, Air & Internet','Beban','Beban Operasional'],['5500','Beban Perlengkapan','Beban','Beban Operasional'],['5600','Beban Lain-lain','Beban','Beban Lain'],['5700','Beban Penyusutan','Beban','Beban Operasional']
 ].map(([kode, nama, tipe, kategori]) => ({ kode, nama, tipe, kategori }));
 const AK = { piutang: '1300', ppnMasuk: '1400', persediaan: '1500', hutang: '2100', ppnKeluar: '2200', penjualan: '4100', pembelian: '5100', modal: '3100' };
-const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'], Produk: ['stok_min'], FakturItem: ['qty', 'harga', 'subtotal'], Stok: ['qty', 'harga', 'nilai'], FakturBiaya: ['jumlah'], Aset: ['harga', 'nilai_sisa', 'umur_bulan', 'jumlah', 'akum'] };
-const SHEET_NAMES = ['Akun', 'Jurnal', 'Faktur', 'KasBank', 'Produk', 'FakturItem', 'Stok', 'FakturBiaya', 'Aset', 'Log'];
+const NUMF = { Jurnal: ['debit', 'kredit'], Faktur: ['subtotal', 'ppn', 'total', 'terbayar'], KasBank: ['jumlah'], Produk: ['stok_min'], FakturItem: ['qty', 'harga', 'subtotal'], Stok: ['qty', 'harga', 'nilai'], FakturBiaya: ['jumlah'], Aset: ['harga', 'nilai_sisa', 'umur_bulan', 'jumlah', 'akum'], Dokumen: ['ukuran'] };
+const SHEET_NAMES = ['Akun', 'Jurnal', 'Faktur', 'KasBank', 'Produk', 'FakturItem', 'Stok', 'FakturBiaya', 'Aset', 'Log', 'Dokumen'];
 const EPS = 0.00005;
 const rq = n => Math.round(num(n) * 10000) / 10000; // kuantitas dibulatkan 4 desimal agar tidak ada sisa pecahan
 const fq = n => rq(n).toLocaleString('id-ID', { maximumFractionDigits: 4 });
@@ -39,10 +39,10 @@ const DEBIT_NORMAL = { Aset: true, Beban: true };
 
 const saved = (() => { try { return JSON.parse(localStorage.getItem('velqo_cfg') || '{}'); } catch { return {}; } })();
 const API_URL = saved.url || CONFIG.API_URL, TOKEN = saved.token || CONFIG.TOKEN;
-let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [], Aset: [], Log: [] };
+let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [], Aset: [], Log: [], Dokumen: [] };
 
 // Versi Code.gs yang diharapkan halaman ini (lihat VERSI di Code.gs). Dipakai untuk menjelaskan galat token.
-const BACKEND_VERSI = 7;
+const BACKEND_VERSI = 8;
 function apiErr(j, fallback) {
   let m = (j && j.error) || fallback;
   if (/^Token salah/.test(m)) {
@@ -78,7 +78,7 @@ const Store = {
     } else {
       const raw = localStorage.getItem('velqo_demo');
       if (raw) S = JSON.parse(raw);
-      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [], Aset: [], Log: [] }; await seedDemo(); }
+      else { S = { Akun: DEFAULT_COA.map(a => ({ ...a })), Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [], Aset: [], Log: [], Dokumen: [] }; await seedDemo(); }
     }
     for (const k of SHEET_NAMES) S[k] = S[k] || [];
     for (const k in NUMF) S[k].forEach(r => NUMF[k].forEach(f => r[f] = num(r[f])));
@@ -344,6 +344,7 @@ async function createFaktur(args) {
   return f;
 }
 async function hapusFaktur(f) {
+  cekBuktiHapus('faktur', f.id);
   if (f.terbayar > 0) throw new Error('Faktur sudah ada pembayaran');
   cekStokSetelahHapus(f.id);
   if (Store.asetReady && S.Aset.some(a => a.faktur_id === f.id && (a.akum > 0 || a.susut_sd))) throw new Error('Aset dari faktur ini sudah disusutkan, faktur tidak bisa dihapus');
@@ -488,13 +489,14 @@ function pKasBank() {
   <div class="bar"><button class="pri" data-k="masuk">+ Kas Masuk</button><button class="pri" data-k="keluar">+ Kas Keluar</button><button data-k="transfer">⇄ Transfer</button></div>
   <div class="cards">${cards || empty('Belum ada akun dengan kategori "Kas & Bank"')}</div>
   <div class="panel"><h3>Mutasi ${st.kas ? esc(akunNama(st.kas)) : ''}</h3>${withBal.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>Keterangan</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Saldo</th><th></th></tr>
-  ${withBal.map(({ j, bal }) => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(j.keterangan)}</td><td class="r ok">${j.debit ? rp(j.debit) : ''}</td><td class="r bad">${j.kredit ? rp(j.kredit) : ''}</td><td class="r">${rp(bal)}</td><td>${['KM', 'KK', 'TF'].includes(j.sumber) ? `<button class="sm" data-edk="${esc(j.ref)}">Edit</button> <button class="sm dan" data-delk="${esc(j.ref)}">Hapus</button>` : ''}</td></tr>`).join('')}</table>` : empty('Belum ada mutasi')}</div>`;
+  ${withBal.map(({ j, bal }) => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(j.keterangan)}</td><td class="r ok">${j.debit ? rp(j.debit) : ''}</td><td class="r bad">${j.kredit ? rp(j.kredit) : ''}</td><td class="r">${rp(bal)}</td><td>${['KM', 'KK', 'TF'].includes(j.sumber) ? `<button class="sm" data-bk="${esc(j.ref)}" title="Bukti transaksi">📎${docsOf('kas', j.ref).length || ''}</button> <button class="sm" data-edk="${esc(j.ref)}">Edit</button> <button class="sm dan" data-delk="${esc(j.ref)}">Hapus</button>` : ''}</td></tr>`).join('')}</table>` : empty('Belum ada mutasi')}</div>`;
 }
 function bindKasBank() {
   $$('[data-kas]').forEach(el => el.onclick = () => { st.kas = el.dataset.kas; render(); });
   $$('[data-k]').forEach(el => el.onclick = () => kasForm(el.dataset.k));
+  $$('[data-bk]').forEach(el => el.onclick = () => { const k = S.KasBank.find(x => x.id === el.dataset.bk); buktiModal('kas', el.dataset.bk, k ? k.nomor : ''); });
   $$('[data-edk]').forEach(el => el.onclick = () => { const k = S.KasBank.find(x => x.id === el.dataset.edk); if (k) kasForm(k.jenis, k); else toast('Data transaksi kas tidak ditemukan', true); });
-  $$('[data-delk]').forEach(el => el.onclick = () => { if (confirm('Hapus transaksi kas ini beserta jurnalnya?')) run(async () => { const k = S.KasBank.find(x => x.id === el.dataset.delk); await Store.remove('Jurnal', 'ref', el.dataset.delk); await Store.remove('KasBank', 'id', el.dataset.delk); if (k) await catat('hapus kas', k.nomor, k.keterangan + ', ' + rp(k.jumlah)); }, 'Transaksi dihapus'); });
+  $$('[data-delk]').forEach(el => el.onclick = () => { if (confirm('Hapus transaksi kas ini beserta jurnalnya?')) run(async () => { const k = S.KasBank.find(x => x.id === el.dataset.delk); cekBuktiHapus('kas', el.dataset.delk); await Store.remove('Jurnal', 'ref', el.dataset.delk); await Store.remove('KasBank', 'id', el.dataset.delk); if (k) await catat('hapus kas', k.nomor, k.keterangan + ', ' + rp(k.jumlah)); }, 'Transaksi dihapus'); });
 }
 function kasForm(jenis, k) {
   const t = { masuk: 'Kas Masuk', keluar: 'Kas Keluar', transfer: 'Transfer Antar Kas/Bank' }[jenis];
@@ -520,7 +522,7 @@ function pFaktur(jenis) {
   <div class="cards"><div class="card"><div class="l">Total bulan ini</div><div class="v">${rp(tot)}</div></div><div class="card"><div class="l">${sales ? 'Belum diterima' : 'Belum dibayar'}</div><div class="v">${rp(open)}</div></div><div class="card"><div class="l">Jatuh tempo</div><div class="v ${od ? 'bad' : ''}">${rp(od)}</div></div></div>
   <div class="bar"><button class="pri" id="addf">+ Faktur ${sales ? 'Penjualan' : 'Pembelian'}</button>${sales ? '<button id="impm">⬆ Impor dari Marketplace</button><button id="trm">⬇ Terima Dana Marketplace</button>' : ''}<span class="sp"></span><input id="q" placeholder="Cari nomor / ${sales ? 'pelanggan' : 'pemasok'}…" value="${esc(st.q[jenis] || '')}"></div>
   <div class="panel" style="padding:0">${list.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>${sales ? 'Pelanggan' : 'Pemasok'}</th><th>Jatuh tempo</th><th class="r">Total</th><th class="r">Sisa</th><th>Status</th></tr>
-  ${list.map(f => { const [t, c] = fakturStatus(f); return `<tr class="rowc" data-f="${f.id}"><td>${tgl(f.tanggal)}</td><td>${esc(f.nomor)}</td><td>${esc(f.pihak)}<div class="mut">${esc(f.keterangan)}</div></td><td>${tgl(f.jatuh_tempo)}</td><td class="r">${rp(f.total)}</td><td class="r">${rp(f.total - f.terbayar)}</td><td><span class="tag ${c}">${t}</span></td></tr>`; }).join('')}</table>` : empty('Belum ada faktur')}</div>`;
+  ${list.map(f => { const [t, c] = fakturStatus(f); return `<tr class="rowc" data-f="${f.id}"><td>${tgl(f.tanggal)}</td><td>${esc(f.nomor)} ${buktiBadge('faktur', f.id)}</td><td>${esc(f.pihak)}<div class="mut">${esc(f.keterangan)}</div></td><td>${tgl(f.jatuh_tempo)}</td><td class="r">${rp(f.total)}</td><td class="r">${rp(f.total - f.terbayar)}</td><td><span class="tag ${c}">${t}</span></td></tr>`; }).join('')}</table>` : empty('Belum ada faktur')}</div>`;
 }
 function bindFaktur(jenis) {
   $('#addf').onclick = () => fakturForm(jenis);
@@ -693,9 +695,10 @@ function fakturDetail(id) {
     ${bys.length ? `<table style="margin-bottom:10px"><tr><th>Biaya tambahan</th><th>Dicatat sebagai</th><th class="r">Jumlah</th></tr>${bys.map(b => `<tr><td>${esc(b.nama)}</td><td class="mut">${b.akun === AK.persediaan ? 'Nilai persediaan' : esc(akunNama(b.akun))}</td><td class="r">${rp(b.jumlah)}</td></tr>`).join('')}</table>` : ''}
     <table><tr><td>Subtotal${biayaSum ? ' barang' : ''}</td><td class="r">${rp(f.subtotal)}</td></tr>${biayaSum ? `<tr><td>Biaya tambahan</td><td class="r">${rp(biayaSum)}</td></tr>` : ''}<tr><td>PPN</td><td class="r">${rp(f.ppn)}</td></tr><tr class="t"><td>Total</td><td class="r">${rp(f.total)}</td></tr><tr><td>${sales ? 'Diterima' : 'Dibayar'}</td><td class="r">${rp(f.terbayar)}</td></tr><tr class="t"><td>Sisa</td><td class="r">${rp(sisa)}</td></tr>${hpp > 0 ? `<tr><td class="mut">HPP (modal barang terjual)</td><td class="r mut">${rp(hpp)}</td></tr>` : ''}</table>
     ${jmlKas > f.terbayar + 0.5 ? `<div class="note" style="margin-top:12px">Jurnal kas ${rp(jmlKas)} lebih besar dari jumlah terbayar ${rp(f.terbayar)}, selisih ${rp(jmlKas - f.terbayar)}. Kemungkinan ada pembayaran yang tersimpan dua kali.${dupIds.length ? ` <button class="sm dan" id="fixdup">Hapus ${dupIds.length} baris jurnal ganda</button>` : ' Periksa di Jurnal Umum.'}</div>` : ''}
-    <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map((j, i) => `<tr><td>${tgl(j.tanggal)}<div class="mut show-sm" style="font-size:12px">${esc(j.nomor)}</div></td><td class="hide-sm">${esc(j.nomor)}</td><td class="hide-sm">${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td><td class="r pay-act">${pays.findIndex(x => x.nomor === j.nomor) === i ? `${S.Jurnal.filter(x => x.ref === f.id && x.nomor === j.nomor).length === 2 ? `<button class="sm" data-pe="${esc(j.nomor)}">Edit</button> ` : ''}<button class="sm dan" data-pd="${esc(j.nomor)}">Hapus</button>` : ''}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}${potong.length ? `<h3 style="margin:14px 0 6px">Potongan marketplace</h3><table>${potong.map(j => `<tr><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit - j.kredit)}</td></tr>`).join('')}</table>` : ''}`,
+    <h3 style="margin:14px 0 6px">Riwayat ${sales ? 'penerimaan' : 'pembayaran'}</h3>${pays.length ? `<table>${pays.map((j, i) => `<tr><td>${tgl(j.tanggal)}<div class="mut show-sm" style="font-size:12px">${esc(j.nomor)}</div></td><td class="hide-sm">${esc(j.nomor)}</td><td class="hide-sm">${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit + j.kredit)}</td><td class="r pay-act">${pays.findIndex(x => x.nomor === j.nomor) === i ? `${S.Jurnal.filter(x => x.ref === f.id && x.nomor === j.nomor).length === 2 ? `<button class="sm" data-pe="${esc(j.nomor)}">Edit</button> ` : ''}<button class="sm dan" data-pd="${esc(j.nomor)}">Hapus</button>` : ''}</td></tr>`).join('')}</table>` : '<div class="mut">Belum ada</div>'}${buktiPanel('faktur', f.id)}${potong.length ? `<h3 style="margin:14px 0 6px">Potongan marketplace</h3><table>${potong.map(j => `<tr><td>${esc(akunNama(j.kode_akun))}</td><td class="r">${rp(j.debit - j.kredit)}</td></tr>`).join('')}</table>` : ''}`,
     `${f.terbayar === 0 ? '<button class="dan" id="del" style="margin-right:auto">Hapus faktur</button>' : ''}<button id="edf" ${f.terbayar === 0 ? '' : 'title="Hapus pembayaran dulu"'}>Edit faktur</button><button data-close>Tutup</button>${sisa > 0.005 ? `<button class="pri" id="pay">${sales ? 'Terima pembayaran' : 'Bayar'}</button>` : ''}`);
   if ($('#edf')) $('#edf').onclick = () => { if (f.terbayar > 0.005) return toast('Faktur sudah ada pembayaran. Hapus pembayarannya dulu di Riwayat, lalu edit faktur.', true); fakturForm(f.jenis, f); };
+  bindBukti('faktur', f.id);
   $$('[data-pe]').forEach(el => el.onclick = () => bayarEditForm(f, el.dataset.pe));
   $$('[data-pd]').forEach(el => el.onclick = () => { if (confirm('Hapus pembayaran ' + el.dataset.pd + '? Faktur kembali memiliki sisa tagihan.')) run(() => hapusBayar(f, el.dataset.pd), 'Pembayaran dihapus'); });
   if ($('#fixdup')) $('#fixdup').onclick = () => { if (confirm('Hapus ' + dupIds.length + ' baris jurnal yang persis sama dengan baris lain di nomor yang sama?')) run(async () => { for (const id of dupIds) await Store.remove('Jurnal', 'id', id); }, 'Jurnal ganda dihapus'); };
@@ -837,15 +840,16 @@ function pJurnal() {
   <select id="jsrc"><option value="">Semua jenis</option>${src.map(s => `<option ${s === st.jsrc ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
   <input id="q" placeholder="Cari nomor / keterangan…" value="${esc(st.q.jurnal || '')}"></div>
   <div class="panel" style="padding:0">${docs.length ? `<table><tr><th>Akun</th><th>Keterangan</th><th class="r">Debit</th><th class="r">Kredit</th><th></th></tr>
-  ${docs.map(g => `<tr class="h"><td colspan="4">${tgl(g[0].tanggal)} · ${esc(g[0].nomor)} <span class="tag">${esc(g[0].sumber)}</span></td><td class="r">${g[0].sumber === 'JU' ? `<button class="sm" data-ej="${esc(g[0].nomor)}">Edit</button> <button class="sm dan" data-dj="${esc(g[0].nomor)}">Hapus</button>` : ''}</td></tr>
+  ${docs.map(g => `<tr class="h"><td colspan="4">${tgl(g[0].tanggal)} · ${esc(g[0].nomor)} <span class="tag">${esc(g[0].sumber)}</span></td><td class="r">${g[0].sumber === 'JU' ? `<button class="sm" data-bj="${esc(g[0].nomor)}" title="Bukti transaksi">📎${docsOf('jurnal', g[0].nomor).length || ''}</button> <button class="sm" data-ej="${esc(g[0].nomor)}">Edit</button> <button class="sm dan" data-dj="${esc(g[0].nomor)}">Hapus</button>` : ''}</td></tr>
   ${g.map(j => `<tr><td style="padding-left:22px">${esc(akunNama(j.kode_akun))}</td><td class="mut">${esc(j.keterangan)}</td><td class="r">${j.debit ? rp(j.debit) : ''}</td><td class="r">${j.kredit ? rp(j.kredit) : ''}</td><td></td></tr>`).join('')}`).join('')}</table>${total > 80 ? `<div class="empty">Menampilkan 80 dari ${total} jurnal. Gunakan pencarian untuk mempersempit.</div>` : ''}` : empty('Belum ada jurnal')}</div>`;
 }
 function bindJurnal() {
   $('#addj').onclick = jurnalForm;
   $('#jsrc').onchange = e => { st.jsrc = e.target.value; render(); };
   $('#q').oninput = e => { st.q.jurnal = e.target.value; const p = e.target.selectionStart; render(); const el = $('#q'); el.focus(); el.setSelectionRange(p, p); };
+  $$('[data-bj]').forEach(el => el.onclick = () => buktiModal('jurnal', el.dataset.bj, el.dataset.bj));
   $$('[data-ej]').forEach(el => el.onclick = () => jurnalForm(S.Jurnal.filter(j => j.nomor === el.dataset.ej)));
-  $$('[data-dj]').forEach(el => el.onclick = () => { if (confirm('Hapus jurnal ' + el.dataset.dj + '?')) run(async () => { const r = S.Jurnal.filter(j => j.nomor === el.dataset.dj); await Store.remove('Jurnal', 'nomor', el.dataset.dj); await catat('hapus jurnal', el.dataset.dj, (r[0] ? r[0].keterangan + ', ' : '') + rp(r.reduce((a, j) => a + j.debit, 0))); }, 'Jurnal dihapus'); });
+  $$('[data-dj]').forEach(el => el.onclick = () => { if (confirm('Hapus jurnal ' + el.dataset.dj + '?')) run(async () => { const r = S.Jurnal.filter(j => j.nomor === el.dataset.dj); cekBuktiHapus('jurnal', el.dataset.dj); await Store.remove('Jurnal', 'nomor', el.dataset.dj); await catat('hapus jurnal', el.dataset.dj, (r[0] ? r[0].keterangan + ', ' : '') + rp(r.reduce((a, j) => a + j.debit, 0))); }, 'Jurnal dihapus'); });
 }
 function jurnalForm(ed) {
   const opts = akunOpts();

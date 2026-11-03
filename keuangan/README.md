@@ -132,6 +132,16 @@ Setiap edit dan hapus tercatat di sheet **Log** (waktu, aksi, nomor, ringkasan p
 
 Belum bisa diedit: penyesuaian stok, jurnal penyusutan, dan faktur yang asetnya sudah disusutkan.
 
+## Bukti transaksi (unggah dokumen)
+
+Setiap faktur, transaksi kas dan jurnal manual bisa diberi bukti berupa foto atau PDF (nota, bukti transfer, resi, tangkapan layar marketplace).
+
+- **Faktur**: buka detail faktur, bagian "Bukti transaksi". **Kas & Bank** dan **Jurnal Umum (jurnal manual)**: tombol 📎 di baris transaksi. Lencana 📎 dengan angka muncul di daftar bila sudah ada bukti.
+- Format PDF, JPG, PNG, WebP, maksimal 4 MB. Foto otomatis dikecilkan di peramban (maks. 1600 px). Jenis file dicek dari isinya, bukan dari nama, di peramban dan di server.
+- File disimpan di folder Google Drive pribadi "Velqo - Bukti Transaksi" (tidak dibagikan). Sheet `Dokumen` hanya mencatat metadata dan sidik jari SHA-256. Setiap kali dokumen dibuka, sidik jari dicocokkan; bila berbeda, muncul peringatan bahwa file berubah.
+- Transaksi yang punya bukti tidak bisa dihapus sebelum buktinya dihapus; unggah dan hapus bukti tercatat di sheet `Log`. Mengedit faktur atau kas tidak melepas bukti; bila nomor jurnal manual berubah karena pindah bulan, bukti ikut dipindah.
+- Pengaturan sekali: tempel Code.gs **versi 8**, jalankan `setup()`, lalu jalankan `izinDrive()` dan setujui izin akses Google Drive, kemudian Deploy, Manage deployments, New version. Di mode demo, file disimpan di peramban saja.
+
 ## Pembayaran tercatat ganda
 
 Tombol Simpan sekarang hanya menerima satu klik sampai prosesnya selesai, jadi klik ganda tidak lagi mengirim transaksi dua kali. Bila ada pembayaran yang sudah terlanjur ganda, buka detail fakturnya: muncul catatan merah dengan tombol **Hapus baris jurnal ganda** (hanya muncul bila total kas di jurnal lebih besar dari jumlah terbayar).
