@@ -25,10 +25,13 @@ const SHEETS = {
   // susut_sd = bulan terakhir yang sudah disusutkan (yyyy-mm), faktur_id = faktur pembelian asalnya.
   // Jejak perubahan: setiap edit atau hapus transaksi dari aplikasi mencatat satu baris di sini.
   Log:       ['id', 'waktu', 'aksi', 'nomor', 'detail'],
+  // Bukti transaksi (v8). File disimpan di folder Google Drive pribadi; sheet ini hanya mencatat metadata dan sidik jari SHA-256.
+  // tipe = faktur | kas | jurnal, ref_id = id faktur / id kas / nomor jurnal manual.
+  Dokumen:   ['id', 'tipe', 'ref_id', 'kategori', 'nama_file', 'mime', 'ukuran', 'sha256', 'drive_id', 'waktu', 'keterangan'],
   Aset:      ['id', 'kode', 'nama', 'akun', 'tanggal', 'harga', 'nilai_sisa', 'umur_bulan', 'jumlah', 'akum', 'susut_sd', 'faktur_id', 'keterangan'],
 };
 const CORE = ['Akun', 'Jurnal', 'Faktur', 'KasBank'];
-const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah', 'qty', 'harga', 'nilai', 'stok_min', 'nilai_sisa', 'umur_bulan', 'akum'];
+const NUMERIC = ['debit', 'kredit', 'subtotal', 'ppn', 'total', 'terbayar', 'jumlah', 'qty', 'harga', 'nilai', 'stok_min', 'nilai_sisa', 'umur_bulan', 'akum', 'ukuran'];
 const DECIMAL = ['qty', 'harga', 'stok_min'];
 
 const COA = [
@@ -59,6 +62,66 @@ const COA = [
 ];
 
 /** Jalankan SEKALI dari editor: membuat sheet, header, format teks, dan daftar akun awal. */
+/* ---------- Bukti transaksi (Google Drive) ---------- */
+const MAX_DOC = 4 * 1024 * 1024; // 4 MB per file
+const DOC_TIPE = ['faktur', 'kas', 'jurnal'];
+
+function folder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) { /* folder terhapus: buat baru */ } }
+  const f = DriveApp.createFolder('Velqo - Bukti Transaksi');
+  props.setProperty('FOLDER_ID', f.getId());
+  return f;
+}
+function hex_(bytes) { return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join(''); }
+// Jenis file ditentukan dari isi file (magic bytes), bukan dari nama atau tipe yang dikirim browser.
+function sniff_(b) {
+  if (b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return 'application/pdf';
+  if (b.length > 3 && (b[0] & 0xff) === 0xff && (b[1] & 0xff) === 0xd8 && (b[2] & 0xff) === 0xff) return 'image/jpeg';
+  if (b.length > 8 && (b[0] & 0xff) === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b.length > 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  return '';
+}
+const EXT_ = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+function uploadDoc_(b) {
+  if (DOC_TIPE.indexOf(b.tipe) < 0) throw new Error('Jenis transaksi tidak dikenal');
+  if (!b.ref_id) throw new Error('Transaksi acuan kosong');
+  const bytes = Utilities.base64Decode(String(b.data || ''));
+  if (!bytes.length) throw new Error('File kosong');
+  if (bytes.length > MAX_DOC) throw new Error('File terlalu besar (maksimal 4 MB)');
+  const mime = sniff_(bytes);
+  if (!mime) throw new Error('Format tidak didukung. Gunakan PDF, JPG, PNG atau WebP.');
+  const sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes));
+  if (b.sha256 && String(b.sha256).toLowerCase() !== sha) throw new Error('File rusak saat dikirim (sidik jari tidak cocok). Coba unggah ulang.');
+  const id = Utilities.getUuid().slice(0, 8);
+  const nama = String(b.nama_file || 'bukti').replace(/[\\\/:*?"<>|\r\n]/g, '_').slice(0, 80);
+  const file = folder_().createFile(Utilities.newBlob(bytes, mime, id + '_' + nama));
+  const row = { id: id, tipe: b.tipe, ref_id: String(b.ref_id), kategori: String(b.kategori || 'Lainnya').slice(0, 40), nama_file: nama, mime: mime, ukuran: bytes.length, sha256: sha, drive_id: file.getId(), waktu: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'), keterangan: String(b.keterangan || '').slice(0, 200) };
+  append_('Dokumen', [row]);
+  return { ok: true, doc: row };
+}
+function docRow_(id) {
+  const rows = read_('Dokumen').filter(function (r) { return r.id === String(id); });
+  if (!rows.length) throw new Error('Dokumen tidak ditemukan');
+  return rows[0];
+}
+function getDoc_(id) {
+  const r = docRow_(id);
+  const blob = DriveApp.getFileById(r.drive_id).getBlob();
+  return { ok: true, nama_file: r.nama_file, mime: r.mime, data: Utilities.base64Encode(blob.getBytes()) };
+}
+function delDoc_(id) {
+  const r = docRow_(id);
+  try { DriveApp.getFileById(r.drive_id).setTrashed(true); } catch (e) { /* file sudah hilang di Drive: tetap hapus catatannya */ }
+  remove_('Dokumen', 'id', id);
+  return { ok: true };
+}
+
+/** Jalankan sekali dari editor setelah menempel Code.gs v8, supaya Google meminta izin akses Drive. */
+function izinDrive() { Logger.log('Folder bukti: ' + folder_().getUrl()); }
+
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   Object.keys(SHEETS).forEach(function (name) {
@@ -122,6 +185,9 @@ function doPost(e) {
       plan.forEach(function (x) { update_(x.u.sheet, x.u.field, x.u.value, x.u.patch); });
       return json_({ ok: true });
     }
+    if (b.action === 'upload') return json_(uploadDoc_(b));
+    if (b.action === 'getfile') return json_(getDoc_(b.id));
+    if (b.action === 'deldoc') return json_(delDoc_(b.id));
     if (!SHEETS[b.sheet]) return json_({ ok: false, error: 'Sheet tidak dikenal' });
     if (b.action === 'append') append_(b.sheet, b.rows);
     else if (b.action === 'update') update_(b.sheet, b.field, b.value, b.patch);
@@ -136,7 +202,7 @@ function doPost(e) {
 }
 
 // Naikkan angka ini setiap Code.gs diubah; halaman Keuangan memakainya untuk mendiagnosis deployment yang belum diperbarui.
-const VERSI = 7;
+const VERSI = 8;
 
 function token_() {
   const p = PropertiesService.getScriptProperties().getProperty('TOKEN');
