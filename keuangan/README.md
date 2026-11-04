@@ -76,6 +76,15 @@ Di halaman **Laporan**, pilih periode lalu klik **Unduh Excel**. Satu file `.xls
 - Faktur memakai Harga Setelah Diskon (Shopee) atau SKU Subtotal After Discount (TikTok). Harga awal tidak disimpan terpisah.
 - File XLSX TikTok yang menomori semua baris "1" kini terbaca benar.
 
+## Bundel / paket di impor marketplace
+
+Untuk SKU paket buatan penjual (mis. `PAKET-2` = 2 pcs produk yang sama dengan harga diskon, atau 1 A + 1 B).
+
+- Di dialog Impor Pesanan, bagian **Bundel / paket**: klik **+ Bundel baru**, atau tombol **Ini bundel** di samping SKU yang belum cocok. Isi SKU persis seperti di file marketplace, pilih produk isi dan jumlah per 1 bundel.
+- Saat impor, baris bundel dipecah per isi: stok dan HPP berkurang per produk. Harga bundel setelah diskon dibagi ke tiap isi menurut perbandingan modal rata-rata, dan total pendapatan tetap sama dengan file. Bila modal belum diketahui (stok 0), pembagian menurut jumlah unit.
+- SKU bundel lebih diutamakan daripada kode produk yang kebetulan sama. Bundel bisa diedit atau dihapus di bagian yang sama.
+- Daftar bundel disimpan di **peramban ini saja** (`localStorage`, kunci `velqo_bundel`), jadi tidak ikut ke perangkat atau peramban lain dan hilang bila data situs dibersihkan. Tidak perlu memperbarui Code.gs.
+
 ## Penerimaan dana massal marketplace
 
 Di tab **Penjualan** klik **⬇ Terima Dana Marketplace**, lalu pilih file penghasilan dari Seller Center (Shopee: Penghasilan, Sudah Dilepas; TikTok Shop: Finance, Pendapatan). Format `.xlsx` dan `.csv` dibaca di browser, lembar kerja dan kolom dikenali otomatis dan bisa diubah.

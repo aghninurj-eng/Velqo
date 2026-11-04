@@ -213,6 +213,27 @@
     return id && produkBy(id) ? id : null;
   }
 
+  /* ---------- Bundel (paket) ----------
+     SKU bundel milik penjual: 1 SKU = beberapa produk Persediaan, mis. PAKET-2 = 2 x P-001. Disimpan di peramban (velqo_bundel).
+     Saat impor, baris bundel dipecah per isi: stok dan HPP berkurang per produk, dan harga bundel (setelah diskon)
+     dibagi menurut perbandingan modal rata-rata tiap isi, jadi total pendapatan tetap sama dengan file marketplace. */
+  const bdlMap = () => lsGet('velqo_bundel', {});
+  const bundelOf = sku => {
+    if (!sku) return null;
+    const b = bdlMap()[sku.trim().toLowerCase()];
+    return b && b.items && b.items.length && b.items.every(c => produkBy(c.pid) && c.qty > 0) ? b : null;
+  };
+  // Bagi `line` ke isi bundel menurut modal rata-rata; bila modal belum diketahui (stok 0), menurut jumlah unit.
+  function pecahBundel(b, qty, line, sm) {
+    const w = b.items.map(c => stokOf(c.pid, sm).avg * c.qty), W = w.reduce((a, x) => a + x, 0), useCost = w.every(x => x > 0) && W > 0;
+    const ww = useCost ? w : b.items.map(c => c.qty), T = ww.reduce((a, x) => a + x, 0);
+    let rest = line;
+    return b.items.map((c, i) => {
+      const q = rq(qty * c.qty), l = i === b.items.length - 1 ? rest : Math.round(line * ww[i] / T);
+      rest -= l; return { produk_id: c.pid, qty: q, harga: l / q, subtotal: l };
+    });
+  }
+
   function compute() {
     const m = imp.map, data = imp.data, label = mpLabel();
     const get = (r, k) => m[k] >= 0 ? String(r[m[k]] == null ? '' : r[m[k]]).trim() : '';
@@ -258,6 +279,8 @@
       if (imp.matchStock) {
         const miss = [];
         o.items.forEach(i => {
+          const bd = bundelOf(i.sku);
+          if (bd) { i.parts = pecahBundel(bd, i.qty, i.line, ctx.sm); i.pid = 'bundel'; return; }
           i.pid = resolveSku(i.sku);
           if (!i.pid) { miss.push(i.sku || '(SKU kosong)'); if (i.sku) { const k = i.sku.toLowerCase(), e = res.skuIssues.get(k) || { sku: i.sku, nama: i.nama, n: 0 }; e.n++; res.skuIssues.set(k, e); } }
         });
@@ -271,7 +294,7 @@
       const base = { jenis: 'penjualan', tanggal: o.tanggal, jatuh_tempo: addDays(o.tanggal, imp.days), pihak: label, keterangan: label + ' #' + o.no + (o.pembeli ? ' · ' + o.pembeli : '') + (o.resi ? ' · Resi ' + o.resi : ''), ppn: false };
       try {
         const b = buildFaktur(imp.matchStock
-          ? { ...base, items: o.items.map(i => ({ produk_id: i.pid, qty: i.qty, harga: i.harga, subtotal: i.line })) }
+          ? { ...base, items: o.items.flatMap(i => i.parts || [{ produk_id: i.pid, qty: i.qty, harga: i.harga, subtotal: i.line }]) }
           : { ...base, akun: AK.penjualan, subtotal: o.total }, ctx);
         o.bundle = b.rows; o.nomor = b.f.nomor; res.counts.ok++; res.totalOk += b.f.total;
       } catch (e) {
@@ -284,6 +307,36 @@
   /* ---------- Tampilan ---------- */
   const STATE = { ok: ['ok', 'Siap diimpor'], dup: ['', 'Sudah diimpor'], stok: ['bad', 'Stok kurang'], sku: ['warn', 'SKU belum cocok'], tgl: ['bad', 'Tanggal tidak valid'], err: ['bad', 'Galat'] };
   const RANK = { err: 0, tgl: 0, stok: 1, sku: 2, dup: 3, ok: 4 };
+
+  const popts = () => [['', '— pilih produk —'], ...S.Produk.slice().sort((a, b) => String(a.kode).localeCompare(String(b.kode))).map(p => [p.id, p.kode + ' · ' + p.nama])];
+  function bdlHtml() {
+    const list = Object.entries(bdlMap()), d = imp.bdl;
+    let h = `<h3 style="margin:18px 0 8px" id="bdlsec">Bundel / paket</h3><p class="mut" style="margin:0 0 8px">Untuk SKU paket (mis. 2 pcs diskon). Isi bundel dikurangkan dari stok per produk, dan harga paket dibagi ke tiap isi menurut perbandingan modal. Daftar bundel tersimpan di peramban ini.</p>`;
+    if (list.length) h += `<div style="overflow-x:auto"><table><tr><th>SKU bundel</th><th>Isi</th><th></th></tr>${list.map(([k, b]) => `<tr><td>${esc(b.sku)}</td><td>${b.items.map(c => { const p = produkBy(c.pid); return fq(c.qty) + ' × ' + esc(p ? p.kode : '(produk dihapus)'); }).join(' + ')}</td><td class="r"><button type="button" class="sm" data-bedit="${esc(k)}">Edit</button> <button type="button" class="sm dan" data-bdel="${esc(k)}">Hapus</button></td></tr>`).join('')}</table></div>`;
+    if (!d) return h + `<div style="margin-top:8px"><button type="button" class="sm" id="bdlnew">+ Bundel baru</button></div>`;
+    return h + `<div class="panel" style="margin-top:10px"><div class="f"><div class="full"><label>SKU bundel (persis seperti di file marketplace)</label><input id="bdlsku" value="${esc(d.sku)}"></div></div>
+      <table style="margin-top:8px"><tr><th>Produk isi</th><th class="r">Jumlah per 1 bundel</th><th></th></tr>${d.rows.map((r, i) => `<tr><td>${sel('bp', popts(), r.pid, `data-bp="${i}"`)}</td><td class="r"><input type="number" min="0.0001" step="any" value="${r.qty}" data-bq="${i}" style="width:90px" class="r"></td><td>${d.rows.length > 1 ? `<button type="button" class="sm" data-bx="${i}">×</button>` : ''}</td></tr>`).join('')}</table>
+      <div class="bar" style="margin-top:8px"><button type="button" class="sm" id="bdladd">+ Isi lain</button><span class="sp"></span><button type="button" id="bdlcancel">Batal</button><button type="button" class="pri" id="bdlsave">Simpan bundel</button></div></div>`;
+  }
+  function bdlBind() {
+    const d = imp.bdl;
+    if ($('#bdlnew')) $('#bdlnew').onclick = () => { imp.bdl = { sku: '', rows: [{ pid: '', qty: 1 }] }; draw(); };
+    $$('[data-newb]').forEach(el => el.onclick = () => { imp.bdl = { sku: el.dataset.newb, rows: [{ pid: '', qty: 1 }] }; draw(); const t = $('#bdlsec'); if (t) t.scrollIntoView(); });
+    $$('[data-bedit]').forEach(el => el.onclick = () => { const b = bdlMap()[el.dataset.bedit]; if (b) { imp.bdl = { sku: b.sku, rows: b.items.map(c => ({ pid: c.pid, qty: c.qty })) }; draw(); } });
+    $$('[data-bdel]').forEach(el => el.onclick = () => { if (!confirm('Hapus bundel ini? Pesanan dengan SKU ini akan kembali berstatus "SKU belum cocok".')) return; const m = bdlMap(); delete m[el.dataset.bdel]; lsSet('velqo_bundel', m); draw(); });
+    if (!d) return;
+    $('#bdlsku').oninput = e => { d.sku = e.target.value; };
+    $$('[data-bp]').forEach(el => el.onchange = () => { d.rows[+el.dataset.bp].pid = el.value; });
+    $$('[data-bq]').forEach(el => el.onchange = () => { d.rows[+el.dataset.bq].qty = parseAmt(el.value) || 0; });
+    $$('[data-bx]').forEach(el => el.onclick = () => { d.rows.splice(+el.dataset.bx, 1); draw(); });
+    $('#bdladd').onclick = () => { d.rows.push({ pid: '', qty: 1 }); draw(); };
+    $('#bdlcancel').onclick = () => { imp.bdl = null; draw(); };
+    $('#bdlsave').onclick = () => {
+      const sku = d.sku.trim(); if (!sku) return toast('SKU bundel wajib diisi', true);
+      const items = []; for (const r of d.rows) { if (!r.pid || !(r.qty > 0)) return toast('Pilih produk dan isi jumlah (lebih dari 0) di setiap baris', true); const x = items.find(i => i.pid === r.pid); if (x) x.qty = rq(x.qty + r.qty); else items.push({ pid: r.pid, qty: rq(r.qty) }); }
+      const m = bdlMap(); m[sku.toLowerCase()] = { sku, items }; lsSet('velqo_bundel', m); imp.bdl = null; toast('Bundel ' + sku + ' disimpan'); draw();
+    };
+  }
 
   function draw() {
     const sc = $('#dbody') ? $('#dbody').scrollTop : 0;
@@ -312,11 +365,12 @@
           <div class="full chk"><input type="checkbox" id="impstock" ${imp.matchStock ? 'checked' : ''} ${Store.invReady ? '' : 'disabled'}><label for="impstock" style="margin:0;font-size:14px;color:var(--ink)">Cocokkan barang ke menu Persediaan lewat SKU (stok berkurang, HPP otomatis)</label></div>
           ${Store.invReady ? '' : '<div class="full mut">Fitur persediaan belum aktif di Spreadsheet (Code.gs lama), jadi hanya pendapatan yang dicatat.</div>'}</div>
         ${res.dateAmbig ? '<div class="note" style="margin-top:10px">Format tanggal di file ambigu (semua tanggal bisa dibaca hari/bulan atau bulan/hari). Diasumsikan Hari/Bulan/Tahun, periksa kolom tanggal di pratinjau atau ubah formatnya di atas.</div>' : ''}`;
+        if (imp.matchStock) h += bdlHtml();
         if (imp.matchStock && res.skuIssues.size) {
           const opts = [['', '— pilih produk —'], ...S.Produk.slice().sort((a, b) => String(a.kode).localeCompare(String(b.kode))).map(p => [p.id, p.kode + ' · ' + p.nama])];
           h += `<h3 style="margin:18px 0 8px">SKU yang belum ada di Persediaan</h3><p class="mut" style="margin:0 0 8px">Cocokkan ke produk yang sudah ada, atau buat produk baru dengan Kode = SKU. Produk baru berstok 0, jadi catat dulu pembelian atau penyesuaian stoknya, lalu impor lagi.</p>
           <div style="overflow-x:auto"><table><tr><th>SKU</th><th class="hide-sm">Contoh nama di file</th><th class="r">Pesanan</th><th>Cocokkan ke</th><th></th></tr>
-          ${[...res.skuIssues.values()].map(e => `<tr><td>${esc(e.sku)}</td><td class="mut hide-sm">${esc(e.nama)}</td><td class="r">${e.n}</td><td>${sel('p', opts, '', `data-sku="${esc(e.sku)}"`)}</td><td><button type="button" class="sm" data-newp="${esc(e.sku)}" data-nm="${esc(e.nama)}">+ Buat produk</button></td></tr>`).join('')}</table></div>`;
+          ${[...res.skuIssues.values()].map(e => `<tr><td>${esc(e.sku)}</td><td class="mut hide-sm">${esc(e.nama)}</td><td class="r">${e.n}</td><td>${sel('p', opts, '', `data-sku="${esc(e.sku)}"`)}</td><td><button type="button" class="sm" data-newp="${esc(e.sku)}" data-nm="${esc(e.nama)}">+ Buat produk</button> <button type="button" class="sm" data-newb="${esc(e.sku)}">Ini bundel</button></td></tr>`).join('')}</table></div>`;
         }
         const c = res.counts, skip = [...res.skippedStatus.values()].reduce((a, b) => a + b, 0);
         const rows = res.orders.slice().sort((a, b) => RANK[a.state] - RANK[b.state] || a.tanggal.localeCompare(b.tanggal)).slice(0, 150);
@@ -363,6 +417,7 @@
       catch (e) { toast(e.message, true); }
       draw();
     });
+    bdlBind();
     if ($('#impgo')) $('#impgo').onclick = doImport;
   }
 
