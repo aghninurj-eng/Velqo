@@ -141,6 +141,16 @@ Setiap edit dan hapus tercatat di sheet **Log** (waktu, aksi, nomor, ringkasan p
 
 Belum bisa diedit: penyesuaian stok, jurnal penyusutan, dan faktur yang asetnya sudah disusutkan.
 
+## Retur penjualan
+
+Di detail faktur penjualan, tombol **Retur** mencatat barang atau nilai yang dikembalikan pelanggan. Tidak perlu memperbarui Code.gs.
+
+- Pilih jumlah per produk dan kondisinya: **Kembali ke stok** (stok bertambah dengan modal saat barang dijual, HPP dikurangi) atau **Rusak** (stok tidak bertambah, modalnya tetap menjadi kerugian). Faktur tanpa daftar barang (jasa) diretur dengan nilai rupiah.
+- Pendapatan dikurangi lewat akun **4150 Retur Penjualan** (dibuat otomatis, tampil sebagai pengurang di Laba Rugi), PPN dibalik sebanding.
+- Bila faktur belum lunas, retur mengurangi sisa tagihan. Bila pelanggan sudah membayar, selisihnya dicatat sebagai pengembalian dana dari rekening kas/bank yang dipilih. Pratinjau di form menunjukkan pembagiannya.
+- Retur punya nomor `RTR/YYYYMM/NNNN`, muncul di bagian Retur pada detail faktur, di Jurnal Umum (jenis RTR), dan di kartu stok. Jumlah yang bisa diretur dibatasi sisa yang belum diretur.
+- Faktur yang punya retur tidak bisa diedit atau dihapus sebelum returnya dihapus. **Hapus** retur mengembalikan jurnal, stok, dan tagihan seperti semula (butuh Code.gs versi 7+; ditolak bila stok hasil retur sudah terjual lagi). Mengubah retur = hapus lalu catat ulang. Retur tercatat di sheet Log.
+
 ## Bukti transaksi (unggah dokumen)
 
 Setiap faktur, transaksi kas dan jurnal manual bisa diberi bukti berupa foto atau PDF (nota, bukti transfer, resi, tangkapan layar marketplace).
