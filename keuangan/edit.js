@@ -91,6 +91,7 @@
   async function gantiFaktur(f, args) {
     needEdit();
     f = S.Faktur.find(x => x.id === f.id) || f;
+    if (S.Jurnal.some(j => j.ref === f.id && j.sumber === 'RTR')) throw new Error('Faktur ini punya retur. Hapus returnya dulu di detail faktur.');
     if (f.terbayar > 0.005) throw new Error('Faktur sudah ada pembayaran. Hapus pembayarannya dulu, lalu edit faktur.');
     if (S.Aset.some(a => a.faktur_id === f.id && (a.akum > 0 || a.susut_sd))) throw new Error('Aset dari faktur ini sudah disusutkan, faktur tidak bisa diedit');
     const sales = f.jenis === 'penjualan', oldAset = S.Aset.filter(a => a.faktur_id === f.id).sort((a, b) => a.kode.localeCompare(b.kode));
