@@ -15,7 +15,7 @@
     kas: ['Bukti transfer', 'Nota / kwitansi', 'Mutasi rekening', 'Lainnya'],
     jurnal: ['Dokumen pendukung', 'Lainnya']
   };
-  const needDoc = () => { if (Store.live && Store.ver < 8) throw new Error('Unggah bukti butuh Code.gs versi 8. Tempel Code.gs terbaru di Apps Script, jalankan setup() dan izinDrive(), lalu Deploy → Manage deployments → New version.'); };
+  const needDoc = () => { if (Store.live && Store.ver < 9) throw new Error('Unggah bukti butuh Code.gs versi 9. Tempel Code.gs terbaru di Apps Script, jalankan setup() dan izinDrive(), lalu Deploy → Manage deployments → New version.'); };
   const docsOf = (tipe, ref) => (S.Dokumen || []).filter(d => d.tipe === tipe && String(d.ref_id) === String(ref));
   const kb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 
@@ -60,13 +60,48 @@
     return { u, mime, nama };
   }
 
+  /* ---------- Folder dan nama file baku ----------
+     Folder Drive menurut jenis transaksi; nama file: TANGGAL_NOMOR_JENIS-BUKTI_PIHAK_URUT, mis. 20261105_BILL-202611-0001_Faktur_CV-Maju_01.jpg */
+  const slug = (t, n) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, n);
+  const KAT_KODE = { 'Faktur / invoice': 'Faktur', 'Bukti pembayaran': 'BuktiBayar', 'Surat jalan / resi': 'SuratJalan', 'Tangkapan layar marketplace': 'Marketplace', 'Bukti transfer': 'BuktiTransfer', 'Nota / kwitansi': 'Nota', 'Mutasi rekening': 'MutasiBank', 'Dokumen pendukung': 'Pendukung' };
+  function infoBaku(tipe, ref, kategori) {
+    let tgl8 = '', nomor = String(ref), pihak = '', folder = 'Lainnya';
+    if (tipe === 'faktur') {
+      const f = S.Faktur.find(x => x.id === ref);
+      if (f) {
+        tgl8 = f.tanggal; nomor = f.nomor; pihak = f.pihak;
+        if (f.jenis === 'penjualan') folder = 'Penjualan';
+        else if (Store.asetReady && S.Aset.some(a => a.faktur_id === f.id)) folder = 'Aset Tetap';
+        else if (S.FakturItem.some(i => i.faktur_id === f.id)) folder = 'Persediaan';
+        else folder = 'Beban';
+      }
+    } else if (tipe === 'kas') {
+      const k = S.KasBank.find(x => x.id === ref);
+      if (k) {
+        tgl8 = k.tanggal; nomor = k.nomor; pihak = k.keterangan;
+        const a = akunBy(k.akun_lawan);
+        folder = a && a.tipe === 'Beban' ? 'Beban' : a && a.kategori === 'Aset Tetap' ? 'Aset Tetap' : a && a.kategori === 'Persediaan' ? 'Persediaan' : 'Kas & Bank';
+      }
+    } else {
+      const j = S.Jurnal.find(x => x.nomor === ref);
+      if (j) { tgl8 = j.tanggal; pihak = j.keterangan; }
+      folder = 'Jurnal Umum';
+    }
+    const seq = String(docsOf(tipe, ref).filter(d => d.kategori === kategori).length + 1).padStart(2, '0');
+    const nama = [slug(tgl8, 10).replace(/-/g, ''), slug(nomor, 30), KAT_KODE[kategori] || slug(kategori, 14) || 'Bukti', slug(pihak, 25), seq].filter(Boolean).join('_');
+    return { folder, nama };
+  }
+
   /* ---------- Operasi ---------- */
   async function unggah(tipe, ref, file, kategori, ket) {
     needDoc();
-    const { u, mime, nama } = await siapkan(file), sha = await sha256(u);
+    const { u, mime, nama: asli } = await siapkan(file), sha = await sha256(u);
+    const { folder, nama: baku } = infoBaku(tipe, ref, kategori), ext = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[mime];
+    const nama = baku + '.' + ext;
+    ket = [ket, file.name ? 'file asli: ' + file.name : ''].filter(Boolean).join(' · ').slice(0, 190);
     let doc;
     if (Store.live) {
-      const j = await Store.post({ action: 'upload', tipe, ref_id: String(ref), kategori, nama_file: nama, sha256: sha, keterangan: ket, data: toB64(u) });
+      const j = await Store.post({ action: 'upload', tipe, ref_id: String(ref), kategori, nama_file: nama, nama_baku: baku, folder, sha256: sha, keterangan: ket, data: toB64(u) });
       doc = j.doc; doc.ukuran = num(doc.ukuran);
     } else {
       doc = { id: uid(), tipe, ref_id: String(ref), kategori, nama_file: nama, mime, ukuran: u.length, sha256: sha, drive_id: '', waktu: new Date().toISOString().slice(0, 19).replace('T', ' '), keterangan: ket };

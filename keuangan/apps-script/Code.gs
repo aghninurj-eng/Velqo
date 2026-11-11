@@ -66,13 +66,25 @@ const COA = [
 const MAX_DOC = 4 * 1024 * 1024; // 4 MB per file
 const DOC_TIPE = ['faktur', 'kas', 'jurnal'];
 
+// Folder induk bukti: Drive Saya > KEUANGAN VELQO 2026 > Bukti Transaksi (nama ada di ROOT_PATH). Bisa dipaksa ke folder lain dengan
+// Script Property FOLDER_ROOT = ID folder (bagian akhir URL folder di Drive). Bila folder tidak ditemukan, dibuat folder baru di Drive Saya.
+const ROOT_PATH = ['KEUANGAN VELQO 2026', 'Bukti Transaksi'];
+function child_(parent, name) { const it = parent.getFoldersByName(name); return it.hasNext() ? it.next() : null; }
 function folder_() {
   const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('FOLDER_ID');
-  if (id) { try { return DriveApp.getFolderById(id); } catch (e) { /* folder terhapus: buat baru */ } }
-  const f = DriveApp.createFolder('Velqo - Bukti Transaksi');
-  props.setProperty('FOLDER_ID', f.getId());
-  return f;
+  const id = props.getProperty('FOLDER_ROOT');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) { /* folder terhapus: cari lagi */ } }
+  let found = null;
+  const top = DriveApp.getFoldersByName(ROOT_PATH[0]);
+  while (top.hasNext() && !found) { const c = child_(top.next(), ROOT_PATH[1]); if (c) found = c; }
+  if (!found) found = DriveApp.createFolder('Velqo - ' + ROOT_PATH[1]);
+  props.setProperty('FOLDER_ROOT', found.getId());
+  return found;
+}
+// Subfolder per jenis transaksi (Aset Tetap, Beban, Persediaan, ...). Dipakai bila sudah ada, dibuat bila belum.
+function subfolder_(root, name) {
+  const n = String(name || 'Lainnya').replace(/[\\\/:*?"<>|\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) || 'Lainnya';
+  return child_(root, n) || root.createFolder(n);
 }
 function hex_(bytes) { return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join(''); }
 // Jenis file ditentukan dari isi file (magic bytes), bukan dari nama atau tipe yang dikirim browser.
@@ -96,8 +108,12 @@ function uploadDoc_(b) {
   const sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes));
   if (b.sha256 && String(b.sha256).toLowerCase() !== sha) throw new Error('File rusak saat dikirim (sidik jari tidak cocok). Coba unggah ulang.');
   const id = Utilities.getUuid().slice(0, 8);
-  const nama = String(b.nama_file || 'bukti').replace(/[\\\/:*?"<>|\r\n]/g, '_').slice(0, 80);
-  const file = folder_().createFile(Utilities.newBlob(bytes, mime, id + '_' + nama));
+  // Nama file baku dari aplikasi (mis. 20261105_BILL-202611-0001_Faktur_CV-Maju_01), dibersihkan lagi di sini lalu diberi ekstensi dari isi file.
+  const dasar = String(b.nama_baku || b.nama_file || 'bukti').replace(/\.[A-Za-z0-9]{1,5}$/, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/-+/g, '-').slice(0, 90) || 'bukti';
+  const dir = subfolder_(folder_(), b.folder);
+  let nama = dasar + '.' + EXT_[mime], n = 1;
+  while (dir.getFilesByName(nama).hasNext()) { n++; nama = dasar + '_' + n + '.' + EXT_[mime]; } // jangan menimpa file yang sudah ada
+  const file = dir.createFile(Utilities.newBlob(bytes, mime, nama));
   const row = { id: id, tipe: b.tipe, ref_id: String(b.ref_id), kategori: String(b.kategori || 'Lainnya').slice(0, 40), nama_file: nama, mime: mime, ukuran: bytes.length, sha256: sha, drive_id: file.getId(), waktu: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'), keterangan: String(b.keterangan || '').slice(0, 200) };
   append_('Dokumen', [row]);
   return { ok: true, doc: row };
@@ -120,7 +136,7 @@ function delDoc_(id) {
 }
 
 /** Jalankan sekali dari editor setelah menempel Code.gs v8, supaya Google meminta izin akses Drive. */
-function izinDrive() { Logger.log('Folder bukti: ' + folder_().getUrl()); }
+function izinDrive() { const f = folder_(); Logger.log('Folder bukti: ' + f.getName() + ' ' + f.getUrl()); }
 
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -202,7 +218,7 @@ function doPost(e) {
 }
 
 // Naikkan angka ini setiap Code.gs diubah; halaman Keuangan memakainya untuk mendiagnosis deployment yang belum diperbarui.
-const VERSI = 8;
+const VERSI = 9;
 
 function token_() {
   const p = PropertiesService.getScriptProperties().getProperty('TOKEN');

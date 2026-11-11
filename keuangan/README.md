@@ -147,9 +147,10 @@ Setiap faktur, transaksi kas dan jurnal manual bisa diberi bukti berupa foto ata
 
 - **Faktur**: buka detail faktur, bagian "Bukti transaksi". **Kas & Bank** dan **Jurnal Umum (jurnal manual)**: tombol 📎 di baris transaksi. Lencana 📎 dengan angka muncul di daftar bila sudah ada bukti.
 - Format PDF, JPG, PNG, WebP, maksimal 4 MB. Foto otomatis dikecilkan di peramban (maks. 1600 px). Jenis file dicek dari isinya, bukan dari nama, di peramban dan di server.
-- File disimpan di folder Google Drive pribadi "Velqo - Bukti Transaksi" (tidak dibagikan). Sheet `Dokumen` hanya mencatat metadata dan sidik jari SHA-256. Setiap kali dokumen dibuka, sidik jari dicocokkan; bila berbeda, muncul peringatan bahwa file berubah.
+- File disimpan di Google Drive pribadi (tidak dibagikan) pada folder **KEUANGAN VELQO 2026 / Bukti Transaksi**, di subfolder menurut jenis transaksi: faktur pembelian aset → `Aset Tetap`, faktur pembelian barang → `Persediaan`, faktur pembelian biaya → `Beban`, kas keluar ke akun beban/aset/persediaan → subfolder yang sesuai, penjualan → `Penjualan`, kas lainnya → `Kas & Bank`, jurnal manual → `Jurnal Umum`. Subfolder yang belum ada dibuat otomatis.
+- Nama file baku: `TANGGAL_NOMOR_JENISBUKTI_PIHAK_URUT`, mis. `20261105_BILL-202611-0001_Faktur_CV-Maju-Jaya_01.jpg`. Nama file asli dicatat di kolom keterangan. Nama kembar tidak menimpa, ditambah `_2`, `_3`. Sheet `Dokumen` hanya mencatat metadata dan sidik jari SHA-256. Setiap kali dokumen dibuka, sidik jari dicocokkan; bila berbeda, muncul peringatan bahwa file berubah.
 - Transaksi yang punya bukti tidak bisa dihapus sebelum buktinya dihapus; unggah dan hapus bukti tercatat di sheet `Log`. Mengedit faktur atau kas tidak melepas bukti; bila nomor jurnal manual berubah karena pindah bulan, bukti ikut dipindah.
-- Pengaturan sekali: tempel Code.gs **versi 8**, jalankan `setup()`, lalu jalankan `izinDrive()` dan setujui izin akses Google Drive, kemudian Deploy, Manage deployments, New version. Di mode demo, file disimpan di peramban saja.
+- Pengaturan sekali: tempel Code.gs **versi 9**, jalankan `setup()`, lalu jalankan `izinDrive()` (cek di log bahwa foldernya benar; bila ingin folder lain, isi Script Property `FOLDER_ROOT` dengan ID folder, yaitu bagian akhir URL folder di Drive) dan setujui izin akses Google Drive, kemudian Deploy, Manage deployments, New version. Di mode demo, file disimpan di peramban saja.
 
 ## Pembayaran tercatat ganda
 
