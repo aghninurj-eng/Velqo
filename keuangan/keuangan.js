@@ -42,7 +42,7 @@ const API_URL = saved.url || CONFIG.API_URL, TOKEN = saved.token || CONFIG.TOKEN
 let S = { Akun: [], Jurnal: [], Faktur: [], KasBank: [], Produk: [], FakturItem: [], Stok: [], FakturBiaya: [], Aset: [], Log: [], Dokumen: [] };
 
 // Versi Code.gs yang diharapkan halaman ini (lihat VERSI di Code.gs). Dipakai untuk menjelaskan galat token.
-const BACKEND_VERSI = 8;
+const BACKEND_VERSI = 9;
 function apiErr(j, fallback) {
   let m = (j && j.error) || fallback;
   if (/^Token salah/.test(m)) {
