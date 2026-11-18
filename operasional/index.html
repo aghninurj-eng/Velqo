@@ -7,16 +7,66 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@600;700&family=Figtree:wght@400;600&display=swap">
 <link rel="stylesheet" href="../assets/css/base.css">
 <link rel="stylesheet" href="../assets/css/nav.css">
+<link rel="stylesheet" href="operasional.css?v=1">
 </head>
 <body>
 <div id="velqo-nav"></div>
 <script src="../assets/js/menu.js"></script>
 <script src="../assets/js/nav.js"></script>
 
-<main class="page">
+<main class="page ops">
   <h1>Operasional</h1>
-  <p class="lead">Kegiatan harian unit usaha.</p>
-  <div class="panel">Isi halaman operasional dipasang di sini.</div>
+  <p class="lead">Rencana kegiatan, tugas, dan catatan rapat dalam satu garis waktu.</p>
+
+  <div class="ops-summary" id="ops-summary" aria-live="polite"></div>
+
+  <div class="ops-bar">
+    <div class="ops-filter" role="group" aria-label="Filter jenis">
+      <button type="button" data-f="semua" aria-pressed="true">Semua</button>
+      <button type="button" data-f="rencana" aria-pressed="false">Rencana</button>
+      <button type="button" data-f="tugas" aria-pressed="false">Tugas</button>
+      <button type="button" data-f="rapat" aria-pressed="false">Rapat</button>
+    </div>
+    <span class="ops-note" id="ops-mode">Tersimpan di browser ini</span>
+    <button type="button" class="btn btn-primary" id="ops-add">+ Tambah</button>
+  </div>
+
+  <section class="panel ops-panel" aria-label="Garis waktu">
+    <ol class="timeline" id="timeline"></ol>
+  </section>
 </main>
+
+<dialog class="ops-dlg" id="ops-dialog" aria-labelledby="ops-dlg-title">
+  <form id="ops-form" novalidate>
+    <div class="ops-dlg-head">
+      <h2 id="ops-dlg-title">Tambah entri</h2>
+      <button type="button" class="btn" id="ops-x" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="ops-dlg-body">
+      <label class="field full"><span>Jenis</span>
+        <select name="jenis">
+          <option value="rencana">Rencana kegiatan</option>
+          <option value="tugas">Tugas</option>
+          <option value="rapat">Catatan rapat</option>
+        </select>
+      </label>
+      <label class="field full"><span>Judul *</span><input name="judul" maxlength="120" autocomplete="off"></label>
+      <label class="field"><span id="l-tanggal">Tanggal *</span><input type="date" name="tanggal"></label>
+      <label class="field" id="w-selesai"><span>Sampai tanggal (opsional)</span><input type="date" name="selesai"></label>
+      <label class="field" id="w-waktu"><span>Jam</span><input type="time" name="waktu"></label>
+      <label class="field full"><span id="l-orang">Penanggung jawab</span><input name="orang" maxlength="120" autocomplete="off"></label>
+      <label class="field full"><span id="l-catatan">Catatan</span><textarea name="catatan" rows="5" maxlength="2000"></textarea></label>
+      <p class="ops-error" id="ops-error" role="alert" hidden></p>
+    </div>
+    <div class="ops-dlg-foot">
+      <button type="button" class="btn btn-danger" id="ops-del" hidden>Hapus</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="ops-cancel">Batal</button>
+      <button type="submit" class="btn btn-primary">Simpan</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="operasional.js?v=1"></script>
 </body>
 </html>
