@@ -228,10 +228,10 @@ const labaRugi = (from, to) => {
    kode akun beban = dicatat sebagai beban. PPN dihitung dari subtotal barang saja. */
 /* buildFaktur menyusun faktur beserta baris item, stok, dan jurnalnya TANPA menyimpan. `ctx` ({Jurnal, Stok, sm}) opsional:
    dipakai impor massal agar nomor dan stok memperhitungkan faktur sebelumnya yang belum tersimpan. */
-function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items, biaya, aset, ganti, sampel }, ctx) {
+function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, subtotal, ppn, items, biaya, aset, ganti, sampel, akunSampel }, ctx) {
   const sales = jenis === 'penjualan';
   // Sampel/affiliate: barang keluar tanpa harga. Tidak ada pendapatan dan piutang; modal barang menjadi beban sampel (bukan HPP).
-  if (sampel) { if (!sales) throw new Error('Sampel hanya untuk penjualan'); ppn = false; biaya = []; aset = []; subtotal = 0; }
+  if (sampel) { if (!sales) throw new Error('Sampel hanya untuk penjualan'); ppn = false; biaya = []; aset = []; subtotal = 0; akunSampel = akunSampel || AK.sampel; if (akunSampel !== AK.sampel && !(akunBy(akunSampel) && akunBy(akunSampel).tipe === 'Beban')) throw new Error('Akun beban untuk sampel tidak valid'); }
   biaya = (biaya || []).filter(b => String(b.nama || '').trim() || num(b.jumlah)).map(b => ({ nama: String(b.nama || '').trim(), jumlah: Math.round(num(b.jumlah)), akun: String(b.akun || 'stok') }));
   if (biaya.length) {
     if (sales) throw new Error('Biaya tambahan hanya untuk faktur pembelian');
@@ -314,11 +314,11 @@ function buildFaktur({ jenis, tanggal, jatuh_tempo, pihak, keterangan, akun, sub
   const biayaLines = biaya.filter(b => b.akun !== 'stok').map(b => ({ kode: b.akun, debit: b.jumlah, ket: 'Biaya ' + b.nama + ' - ' + pihak }));
   const capLine = capTotal ? [{ kode: akun, debit: capTotal, ket: 'Biaya ke nilai barang: ' + biaya.filter(b => b.akun === 'stok').map(b => b.nama).join(', ') + ' - ' + pihak }] : [];
   const asetLines = []; asetRows.forEach(r => { const l = asetLines.find(x => x.kode === r.akun); if (l) l.debit += r.harga; else asetLines.push({ kode: r.akun, debit: r.harga, ket: 'Pembelian aset - ' + pihak }); });
-  const lines = sampel ? (cogs > 0 ? [{ kode: AK.sampel, debit: cogs }, { kode: AK.persediaan, kredit: cogs }] : []) : sales
+  const lines = sampel ? (cogs > 0 ? [{ kode: akunSampel, debit: cogs }, { kode: AK.persediaan, kredit: cogs }] : []) : sales
     ? [{ kode: AK.piutang, debit: total }, { kode: akun, kredit: subtotal }, { kode: AK.ppnKeluar, kredit: ppnAmt }, { kode: AK.pembelian, debit: cogs }, { kode: AK.persediaan, kredit: cogs }]
     : [...(asetLines.length ? asetLines : [{ kode: akun, debit: subtotal }, ...capLine]), ...biayaLines, { kode: AK.ppnMasuk, debit: ppnAmt }, { kode: AK.hutang, kredit: total }];
   const jr = lines.length ? jurnalRows({ tanggal, nomor, keterangan: (sampel ? 'Sampel affiliate ke ' : sales ? 'Penjualan ke ' : 'Pembelian dari ') + pihak + (keterangan ? ' - ' + keterangan : ''), sumber: sampel ? 'SMP' : sales ? 'INV' : 'BILL', ref: id, lines }) : [];
-  const rows = { Akun: akunNew.concat(sampel && cogs > 0 ? akunBaru([AK_SAMPEL]) : []), Aset: asetRows, Faktur: [f], FakturItem: itemRows, FakturBiaya: Store.biayaReady ? biayaRows : [], Stok: stokRows, Jurnal: jr };
+  const rows = { Akun: akunNew.concat(sampel && cogs > 0 && akunSampel === AK.sampel ? akunBaru([AK_SAMPEL]) : []), Aset: asetRows, Faktur: [f], FakturItem: itemRows, FakturBiaya: Store.biayaReady ? biayaRows : [], Stok: stokRows, Jurnal: jr };
   if (ctx) { ctx.Jurnal.push(...jr); ctx.Stok.push(...stokRows); if (ctx.sm) Object.assign(ctx.sm, localStok); }
   return { f, rows };
 }

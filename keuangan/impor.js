@@ -296,7 +296,7 @@
       const base = { jenis: 'penjualan', tanggal: o.tanggal, jatuh_tempo: addDays(o.tanggal, imp.days), pihak: label, keterangan: label + ' #' + o.no + (o.pembeli ? ' · ' + o.pembeli : '') + (o.resi ? ' · Resi ' + o.resi : ''), ppn: false };
       try {
         const b = buildFaktur(imp.matchStock
-          ? { ...base, sampel: o.sampel, items: o.items.flatMap(i => i.parts || [{ produk_id: i.pid, qty: i.qty, harga: i.harga, subtotal: i.line }]) }
+          ? { ...base, sampel: o.sampel, akunSampel: imp.akunOrder[o.no] || imp.sampelAkun, items: o.items.flatMap(i => i.parts || [{ produk_id: i.pid, qty: i.qty, harga: i.harga, subtotal: i.line }]) }
           : { ...base, akun: AK.penjualan, subtotal: o.total }, ctx);
         o.bundle = b.rows; o.nomor = b.f.nomor; res.counts.ok++; res.totalOk += b.f.total; if (o.sampel) res.counts.smp++;
       } catch (e) {
@@ -366,7 +366,8 @@
           <div><label>Format tanggal di file</label>${sel('datefmt', [['auto', 'Otomatis'], ['dmy', 'Hari/Bulan/Tahun'], ['mdy', 'Bulan/Hari/Tahun']], imp.dateFmt, 'id="impdate"')}</div>
           <div class="full chk"><input type="checkbox" id="impstock" ${imp.matchStock ? 'checked' : ''} ${Store.invReady ? '' : 'disabled'}><label for="impstock" style="margin:0;font-size:14px;color:var(--ink)">Cocokkan barang ke menu Persediaan lewat SKU (stok berkurang, HPP otomatis)</label></div>
           ${imp.matchStock ? `<div class="full chk"><input type="checkbox" id="impsmp" ${imp.sampelOn ? 'checked' : ''}><label for="impsmp" style="margin:0;font-size:14px;color:var(--ink)">Pesanan bernilai barang sampai Rp <input type="number" id="impsmpmax" min="0" step="any" value="${imp.sampelMax}" style="width:110px;display:inline-block;padding:2px 6px"> dicatat sebagai <b>sampel / affiliate</b> (bukan penjualan)</label></div>
-          <div class="full mut" style="font-size:12px">Untuk pesanan yang barangnya dikirim gratis dan pembeli hanya membayar ongkir. Modal barang dicatat sebagai Beban Sampel & Affiliate, bukan HPP. Pesanan yang tidak terdeteksi bisa ditandai sendiri di pratinjau (kotak "Sampel").</div>` : ''}
+          <div class="full"><label>Bebankan sampel ke akun</label>${sel('sakun', window.akunSampelOpts(), imp.sampelAkun, 'id="impsak"')}</div>
+          <div class="full mut" style="font-size:12px">Untuk pesanan yang barangnya dikirim gratis dan pembeli hanya membayar ongkir. Modal barang dicatat sebagai beban pada akun yang dipilih (bukan HPP); akun bisa diganti per pesanan di pratinjau. Pesanan yang tidak terdeteksi bisa ditandai sendiri di pratinjau (kotak "Sampel").</div>` : ''}
           ${Store.invReady ? '' : '<div class="full mut">Fitur persediaan belum aktif di Spreadsheet (Code.gs lama), jadi hanya pendapatan yang dicatat.</div>'}</div>
         ${res.dateAmbig ? '<div class="note" style="margin-top:10px">Format tanggal di file ambigu (semua tanggal bisa dibaca hari/bulan atau bulan/hari). Diasumsikan Hari/Bulan/Tahun, periksa kolom tanggal di pratinjau atau ubah formatnya di atas.</div>' : ''}`;
         if (imp.matchStock) h += bdlHtml();
@@ -385,7 +386,7 @@
         ${res.sci ? '<div class="note" style="margin-bottom:10px">Nomor pesanan di file terbaca dalam notasi ilmiah (mis. 5.77E+17), artinya digitnya sudah terpotong di Excel dan beberapa pesanan bisa tertukar. Pesanan itu tidak diimpor. Ekspor ulang langsung dari marketplace dalam format CSV, atau jangan simpan ulang file lewat Excel.</div>' : ''}
         ${c.stok ? '<div class="note" style="margin-bottom:10px">Pesanan bertanda "Stok kurang" tidak diimpor. Catat dulu pembelian atau penyesuaian stok produknya (tanggalnya sebelum pesanan), lalu impor lagi: yang sudah masuk tidak akan dobel.</div>' : ''}
         ${rows.length ? `<div class="panel" style="padding:0"><table class="pv"><tr class="hd"><th class="hide-sm">Tanggal</th><th>No. pesanan</th><th class="hide-sm">Pembeli</th><th class="r hide-sm">Barang</th><th class="r">Total</th><th>Status</th></tr>
-        ${rows.map(o => { const [cl, tx] = STATE[o.state]; return `<tr><td class="hide-sm">${o.tanggal ? tgl(o.tanggal) : '-'}</td><td class="pno">${esc(o.no)}<div class="mut show-sm" style="font-size:12px">${o.tanggal ? tgl(o.tanggal) : '-'}${o.pembeli ? ' · ' + esc(o.pembeli) : ''}</div></td><td class="hide-sm">${esc(o.pembeli) || '<span class="mut">-</span>'}</td><td class="r hide-sm">${o.items.length}</td><td class="r ptot">${rp(o.total)}</td><td class="pst"><span class="tag ${cl}">${tx}${o.state === 'ok' && o.sampel ? ' · sampel' : ''}</span>${o.state === 'ok' && imp.matchStock ? `<label class="chk" style="margin:4px 0 0;font-size:12px"><input type="checkbox" data-smp="${esc(o.no)}" ${o.sampel ? 'checked' : ''}> Sampel / affiliate</label>` : ''}${o.msg ? `<div class="mut" style="font-size:12px">${esc(o.msg)}</div>` : ''}</td></tr>`; }).join('')}</table></div>
+        ${rows.map(o => { const [cl, tx] = STATE[o.state]; return `<tr><td class="hide-sm">${o.tanggal ? tgl(o.tanggal) : '-'}</td><td class="pno">${esc(o.no)}<div class="mut show-sm" style="font-size:12px">${o.tanggal ? tgl(o.tanggal) : '-'}${o.pembeli ? ' · ' + esc(o.pembeli) : ''}</div></td><td class="hide-sm">${esc(o.pembeli) || '<span class="mut">-</span>'}</td><td class="r hide-sm">${o.items.length}</td><td class="r ptot">${rp(o.total)}</td><td class="pst"><span class="tag ${cl}">${tx}${o.state === 'ok' && o.sampel ? ' · sampel' : ''}</span>${o.state === 'ok' && imp.matchStock ? `<label class="chk" style="margin:4px 0 0;font-size:12px"><input type="checkbox" data-smp="${esc(o.no)}" ${o.sampel ? 'checked' : ''}> Sampel / affiliate</label>${o.sampel ? sel('oak', window.akunSampelOpts(), imp.akunOrder[o.no] || imp.sampelAkun, `data-oak="${esc(o.no)}" style="margin-top:4px;font-size:12px;max-width:200px"`) : ''}` : ''}${o.msg ? `<div class="mut" style="font-size:12px">${esc(o.msg)}</div>` : ''}</td></tr>`; }).join('')}</table></div>
         ${res.orders.length > rows.length ? `<div class="mut" style="margin-top:6px">Menampilkan ${rows.length} dari ${res.orders.length} pesanan (yang bermasalah ditampilkan lebih dulu).</div>` : ''}` : empty('Tidak ada pesanan yang cocok dengan status terpilih.')}`;
       }
     }
@@ -411,6 +412,8 @@
     $$('[data-map]').forEach(el => el.onchange = () => { imp.map[el.dataset.map] = parseInt(el.value); draw(); });
     if ($('#impsmp')) $('#impsmp').onchange = e => { imp.sampelOn = e.target.checked; draw(); };
     if ($('#impsmpmax')) $('#impsmpmax').onchange = e => { imp.sampelMax = Math.max(0, parseAmt(e.target.value) || 0); draw(); };
+    if ($('#impsak')) $('#impsak').onchange = e => { imp.sampelAkun = e.target.value; window.akunSampelSimpan(e.target.value); draw(); };
+    $$('[data-oak]').forEach(el => el.onchange = () => { imp.akunOrder[el.dataset.oak] = el.value; draw(); });
     $$('[data-smp]').forEach(el => el.onchange = () => { imp.force[el.dataset.smp] = el.checked; draw(); });
     $$('[data-st]').forEach(el => el.onchange = () => { imp.statusOn[el.dataset.st] = el.checked; draw(); });
     if ($('#impdays')) $('#impdays').onchange = e => { imp.days = Math.max(0, parseInt(e.target.value) || 0); draw(); };
@@ -481,13 +484,13 @@
     render();
     modal('Impor selesai', `<div class="cards"><div class="card"><div class="l">Pesanan diimpor</div><div class="v ok">${done}</div></div><div class="card"><div class="l">Total penjualan</div><div class="v">${rp(total)}</div></div></div>
       <p class="mut" style="margin:10px 0 0">Dilewati: ${c.dup} sudah pernah diimpor, ${skip} karena status, ${c.sku} SKU belum cocok, ${c.stok} stok kurang, ${c.err + c.tgl} galat data.</p>
-      ${c.smp ? `<p style="margin:12px 0 0">${c.smp} di antaranya dicatat sebagai <b>pesanan sampel / affiliate</b> (nomor SMP, tanpa pendapatan; modal barang masuk Beban Sampel & Affiliate). Dana ongkirnya dicatat lewat Terima Dana Marketplace.</p>` : ''}<p style="margin:12px 0 0">Setiap pesanan tercatat sebagai faktur penjualan <b>belum lunas</b> atas nama <b>${esc(label)}</b>. Saat dana cair, klik <b>Terima Dana Marketplace</b> dan unggah file penghasilannya: pelunasan dan potongan komisi, biaya layanan, serta ongkir dicatat sekaligus.</p>`,
+      ${c.smp ? `<p style="margin:12px 0 0">${c.smp} di antaranya dicatat sebagai <b>pesanan sampel / affiliate</b> (nomor SMP, tanpa pendapatan; modal barang masuk beban sampel pada akun yang dipilih). Dana ongkirnya dicatat lewat Terima Dana Marketplace.</p>` : ''}<p style="margin:12px 0 0">Setiap pesanan tercatat sebagai faktur penjualan <b>belum lunas</b> atas nama <b>${esc(label)}</b>. Saat dana cair, klik <b>Terima Dana Marketplace</b> dan unggah file penghasilannya: pelunasan dan potongan komisi, biaya layanan, serta ongkir dicatat sekaligus.</p>`,
       '<button class="pri" data-close>Tutup</button>');
     imp = null;
   }
 
   function imporModal() {
-    imp = { mp: 'shopee', custom: '', file: '', all: null, headers: [], data: [], hdr: 0, map: {}, statusOn: {}, days: 14, dateFmt: 'auto', matchStock: Store.invReady && S.Produk.length > 0, sampelOn: true, sampelMax: 0, force: {}, err: '', res: null };
+    imp = { mp: 'shopee', custom: '', file: '', all: null, headers: [], data: [], hdr: 0, map: {}, statusOn: {}, days: 14, dateFmt: 'auto', matchStock: Store.invReady && S.Produk.length > 0, sampelOn: true, sampelMax: 0, force: {}, akunOrder: {}, sampelAkun: window.akunSampelDef ? window.akunSampelDef() : '5750', err: '', res: null };
     draw();
   }
 
