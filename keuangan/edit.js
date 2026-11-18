@@ -62,6 +62,7 @@
 
   function bayarEditForm(f, nomor) {
     const rows = payRowsOf(f, nomor), sales = f.jenis === 'penjualan';
+    if (isSampel(f)) return toast('Penerimaan pesanan sampel tidak diedit. Hapus lalu catat ulang dari Terima Dana Marketplace.', true);
     const kas = rows.find(j => { const a = akunBy(j.kode_akun); return a && a.kategori === 'Kas & Bank'; });
     if (rows.length !== 2 || !kas) return toast('Penerimaan massal marketplace tidak bisa diedit. Hapus lalu catat ulang dari Terima Dana Marketplace.', true);
     const a = applied(f, rows), maks = f.total - (f.terbayar - a);
@@ -91,6 +92,7 @@
   async function gantiFaktur(f, args) {
     needEdit();
     f = S.Faktur.find(x => x.id === f.id) || f;
+    if (isSampel(f)) throw new Error('Pesanan sampel tidak diedit. Hapus lalu catat ulang.');
     if (S.Jurnal.some(j => j.ref === f.id && j.sumber === 'RTR')) throw new Error('Faktur ini punya retur. Hapus returnya dulu di detail faktur.');
     if (f.terbayar > 0.005) throw new Error('Faktur sudah ada pembayaran. Hapus pembayarannya dulu, lalu edit faktur.');
     if (S.Aset.some(a => a.faktur_id === f.id && (a.akum > 0 || a.susut_sd))) throw new Error('Aset dari faktur ini sudah disusutkan, faktur tidak bisa diedit');
