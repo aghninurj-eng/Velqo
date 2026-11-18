@@ -20,6 +20,7 @@
     { k: 'komisi', l: 'Komisi & administrasi', kode: '5610', nama: 'Beban Komisi & Administrasi Marketplace' },
     { k: 'layanan', l: 'Biaya layanan & proses', kode: '5620', nama: 'Beban Layanan Marketplace' },
     { k: 'ongkir', l: 'Ongkos kirim', kode: '5630', nama: 'Beban Ongkos Kirim Marketplace' },
+    { k: 'afiliasi', l: 'Komisi affiliate', kode: '5670', nama: 'Beban Komisi Affiliate' },
     { k: 'promo', l: 'Voucher, promosi & iklan', kode: '5640', nama: 'Beban Voucher & Promosi Marketplace' },
     { k: 'pajak', l: 'Pajak dipungut (PPh 22 dll.)', kode: '5650', nama: 'Beban Pajak Marketplace' },
     { k: 'lain', l: 'Potongan lain', kode: '5660', nama: 'Beban Potongan Lain Marketplace' },
@@ -78,12 +79,16 @@
     const n = I().normH(h);
     if (/pph|pajak|tax/.test(n)) return 'pajak';
     if (/ongkir|ongkoskirim|kirim|pengiriman|logistik|insurance|subsidi/.test(n)) return 'ongkir';
-    if (/komisi|administrasi|afiliasi|ams/.test(n)) return 'komisi';
+    if (/afiliasi|affiliate/.test(n)) return 'afiliasi';
+    if (/komisi|administrasi|ams/.test(n)) return 'komisi';
     if (/voucher|cashback|diskon|koin|promo|iklan|kampanye|campaign/.test(n)) return 'promo';
     if (/biaya|layanan|premi|fee|program/.test(n)) return 'layanan';
     return 'lain';
   }
   // Kolom subtotal yang isinya sudah dihitung dari kolom lain di sebelahnya: dilewati agar tidak terhitung dua kali.
+  // Akun per kolom: pilihan sendiri (disimpan per marketplace menurut nama kolom), bila tidak ada, ikut kelompok otomatis dari nama kolom.
+  const colKey = c => { const k = tm.colAkun && tm.colAkun[I().normH(tm.headers[c])]; return k && akunBy(k) ? '@' + k : catOf(tm.headers[c]); };
+  const keyAkun = k => k[0] === '@' ? k.slice(1) : tm.akun[k];
   const isSubtotal = h => { const n = I().normH(h); return n === 'ongkir' || n === 'totalbiaya'; };
 
   /* ---------- Hitung ---------- */
@@ -99,7 +104,7 @@
     S.Faktur.forEach(f => { if (f.jenis === 'penjualan') { const k = String(f.keterangan).split(' · ')[0]; if (!keys.has(k)) keys.set(k, f); } });
     const done = new Set(S.Jurnal.filter(j => j.sumber === 'RCV' && String(j.keterangan).startsWith('Dana ')).map(j => j.keterangan));
     const comps = [];
-    if (m.c1 >= 0 && m.c2 >= m.c1) for (let c = m.c1; c <= m.c2; c++) if (tm.headers[c] && !isSubtotal(tm.headers[c])) comps.push([c, catOf(tm.headers[c])]);
+    if (m.c1 >= 0 && m.c2 >= m.c1) for (let c = m.c1; c <= m.c2; c++) if (tm.headers[c] && !isSubtotal(tm.headers[c])) comps.push([c, colKey(c)]);
     const fixedDate = tm.dateMode === 'one' ? tm.date : '';
     for (const r of tm.data) {
       if (blank(r)) continue;
@@ -156,6 +161,7 @@
   function defaults() {
     tm.akun = {};
     CATS.forEach(c => { tm.akun[c.k] = c.kode; });
+    tm.colAkun = lsGet('velqo_terimacol_' + tm.mp, {});
     const s = lsGet('velqo_terimaakun', null);
     if (s) CATS.forEach(c => { if (s[c.k] && S.Akun.some(a => a.kode === s[c.k])) tm.akun[c.k] = s[c.k]; });
     const ex = S.Akun.find(a => a.kategori === 'Kas & Bank' && a.nama.toLowerCase().includes(label().toLowerCase().split(' ')[0]));
@@ -195,6 +201,20 @@
 
   const stTag = { ok: ['ok', 'Siap'], warn: ['warn', 'Periksa'], nof: ['bad', 'Tanpa faktur'], lunas: ['', 'Sudah lunas'], dup: ['', 'Sudah dicatat'], zero: ['', 'Dilewati'], err: ['bad', 'Galat'] };
 
+  // Tabel kolom potongan yang berisi angka di file: tiap kolom bisa diarahkan ke akun beban tertentu.
+  function colTable() {
+    const rows = []; const m = tm.map; if (!(m.c1 >= 0 && m.c2 >= m.c1)) return '';
+    for (let c = m.c1; c <= m.c2; c++) {
+      if (!tm.headers[c] || isSubtotal(tm.headers[c])) continue;
+      let t = 0; tm.data.forEach(r => { const v = I().parseAmt(r[c]); if (!isNaN(v)) t += v; });
+      if (Math.abs(t) < 0.5) continue;
+      rows.push({ c, name: tm.headers[c], t, cat: CATS.find(x => x.k === catOf(tm.headers[c])) });
+    }
+    if (!rows.length) return '';
+    const opts = [['', 'Otomatis'], ...S.Akun.filter(a => a.tipe === 'Beban').sort((a, b) => a.kode.localeCompare(b.kode)).map(a => [a.kode, a.kode + ' · ' + a.nama])];
+    return `<div style="overflow-x:auto;margin-top:10px"><table><tr><th>Kolom di file</th><th class="r">Total</th><th>Dibebankan ke</th></tr>${rows.map(r => `<tr><td>${esc(String(r.name).slice(0, 50))}<div class="mut" style="font-size:12px">kelompok otomatis: ${esc(r.cat.l)}</div></td><td class="r">${rp(r.t)}</td><td>${sel('ca', opts, (tm.colAkun[I().normH(r.name)] && akunBy(tm.colAkun[I().normH(r.name)])) ? tm.colAkun[I().normH(r.name)] : '', `data-col="${esc(I().normH(r.name))}"`)}</td></tr>`).join('')}</table></div>`;
+  }
+
   function draw() {
     const sc = $('#dbody') ? $('#dbody').scrollTop : 0;
     const res = tm.sheets ? compute() : null; tm.res = res;
@@ -220,11 +240,11 @@
         h += `<h3 style="margin:18px 0 8px">2. Pengaturan</h3><div class="f">
           <div><label>Dana masuk ke akun</label>${akunSelect('kas', tm.kas, a => a.kategori === 'Kas & Bank', { kode: KAS_BARU[tm.mp][0], nama: KAS_BARU[tm.mp][1] })}<div class="mut" style="font-size:12px;margin-top:2px">Pakai akun "Saldo ${esc(label())}" bila dana belum ditarik ke bank, lalu pindahkan lewat Transfer saat penarikan.</div></div>
           <div><label>Tanggal penerimaan</label>${sel('dm', [['file', 'Sesuai tanggal di file'], ['one', 'Satu tanggal untuk semua']], tm.dateMode, 'id="tmdm"')}${tm.dateMode === 'one' ? `<input type="date" id="tmdate" value="${esc(tm.date)}" style="margin-top:6px">` : ''}</div></div>
-          <details style="margin-top:10px"><summary style="cursor:pointer">Akun beban untuk tiap kelompok potongan</summary><div class="f" style="margin-top:8px">
-          ${CATS.map(k => `<div><label>${k.l}</label>${akunSelect('ak_' + k.k, tm.akun[k.k], a => a.tipe === 'Beban', k)}</div>`).join('')}</div></details>
+          <details open style="margin-top:10px"><summary style="cursor:pointer"><b>Akun beban untuk potongan marketplace</b></summary><div class="mut" style="font-size:12px;margin:6px 0">Pilih akun untuk tiap kelompok potongan. Bila satu kolom di file perlu akun lain (mis. komisi affiliate atau iklan), atur di tabel kolom di bawahnya.</div><div class="f" style="margin-top:8px">
+          ${CATS.map(k => `<div><label>${k.l}</label>${akunSelect('ak_' + k.k, tm.akun[k.k], a => a.tipe === 'Beban', k)}</div>`).join('')}</div>${colTable()}</details>
           <h3 style="margin:18px 0 8px">3. Pratinjau</h3>
           <div class="cards"><div class="card"><div class="l">Pesanan dipilih</div><div class="v ok">${onN}</div></div><div class="card"><div class="l">Dana cair</div><div class="v">${rp(res.tot.net)}</div></div><div class="card"><div class="l">Total potongan</div><div class="v">${rp(res.tot.fee)}</div></div></div>
-          ${Object.keys(res.cat).length ? `<table style="margin-top:10px">${CATS.filter(k => res.cat[k.k]).map(k => `<tr><td>${k.l}</td><td class="r">${rp(res.cat[k.k])}</td></tr>`).join('')}</table>` : ''}
+          ${Object.keys(res.cat).length ? `<table style="margin-top:10px">${Object.keys(res.cat).map(k => { const c = CATS.find(x => x.k === k); return `<tr><td>${c ? c.l : esc(akunNama(k.slice(1)))}<span class="mut" style="font-size:12px"> → ${esc(akunNama(keyAkun(k)) || keyAkun(k))}</span></td><td class="r">${rp(res.cat[k])}</td></tr>`; }).join('')}</table>` : ''}
           <p class="mut" style="margin:10px 0 6px">Siap ${c.ok}, perlu diperiksa ${c.warn}, tanpa faktur ${c.nof}, sudah lunas/dicatat ${c.lunas + c.dup}, tanpa dana (retur/batal) ${c.zero}, galat ${c.err}${c.skip ? ', baris rincian dilewati ' + c.skip : ''}.</p>
           <div class="bar" style="margin-bottom:6px"><button class="sm" id="tmall">Pilih semua yang bisa</button><button class="sm" id="tmnone">Kosongkan</button></div>
           ${res.orders.length ? `<div style="border:1px solid var(--line);border-radius:6px;max-height:340px;overflow:auto"><table class="pv"><tr class="hd"><th></th><th>No. pesanan</th><th class="hide-sm">Tanggal</th><th class="r">Dana cair</th><th class="r hide-sm">Potongan</th><th class="r hide-sm">Sisa faktur</th><th>Status</th></tr>
@@ -250,6 +270,7 @@
     if ($('#tmdm')) $('#tmdm').onchange = e => { tm.dateMode = e.target.value; tm.sel = {}; draw(); };
     if ($('#tmdate')) $('#tmdate').onchange = e => { tm.date = e.target.value; tm.sel = {}; draw(); };
     CATS.forEach(k => { const el = $('[name=ak_' + k.k + ']'); if (el) el.onchange = e => { tm.akun[k.k] = e.target.value; draw(); }; });
+    $$('[data-col]').forEach(el => el.onchange = () => { if (el.value) tm.colAkun[el.dataset.col] = el.value; else delete tm.colAkun[el.dataset.col]; tm.sel = {}; draw(); });
     $$('[data-o]').forEach(el => el.onchange = () => { tm.sel[el.dataset.o] = el.checked; draw(); });
     if ($('#tmall')) $('#tmall').onclick = () => { tm.res.orders.forEach(o => { if (o.state === 'ok' || o.state === 'warn') tm.sel[o.no] = true; }); draw(); };
     if ($('#tmnone')) $('#tmnone').onclick = () => { tm.res.orders.forEach(o => { tm.sel[o.no] = false; }); draw(); };
@@ -261,7 +282,7 @@
     const lb = label(), lines = [];
     const add = (kode, v) => { if (!v) return; const l = lines.find(x => x.kode === kode); if (l) { l.debit += v > 0 ? v : 0; l.kredit += v < 0 ? -v : 0; } else lines.push({ kode, debit: v > 0 ? v : 0, kredit: v < 0 ? -v : 0 }); };
     add(tm.kas, o.net);
-    for (const k in o.exp) add(tm.akun[k], o.exp[k]);
+    for (const k in o.exp) add(keyAkun(k), o.exp[k]);
     if (o.sisa) lines.push({ kode: AK.piutang, kredit: o.sisa });
     const nomor = nextNo('RCV', o.tgl, ctx);
     const rows = jurnalRows({ tanggal: o.tgl, nomor, keterangan: 'Dana ' + lb + ' #' + o.no, sumber: 'RCV', ref: o.f.id, lines });
@@ -279,7 +300,7 @@
     const need = (kode, nama, tipe, kategori) => { if (!akunBy(kode) && !newAk.some(a => a.kode === kode)) newAk.push({ kode, nama, tipe, kategori }); };
     const kb = Object.values(KAS_BARU).find(x => x[0] === tm.kas); if (kb) need(kb[0], kb[1], 'Aset', 'Kas & Bank');
     const usedCats = new Set(); list.forEach(o => Object.keys(o.exp).forEach(k => usedCats.add(k)));
-    usedCats.forEach(k => { const c = CATS.find(x => x.k === k); if (tm.akun[k] === c.kode) need(c.kode, c.nama, 'Beban', 'Beban Lain'); });
+    usedCats.forEach(k => { const c = CATS.find(x => x.k === k); if (c && tm.akun[k] === c.kode) need(c.kode, c.nama, 'Beban', 'Beban Lain'); });
     const CH = 40; let done = 0, tot = 0;
     try {
       const ctx = [];
@@ -296,7 +317,7 @@
       render(); draw(); return;
     }
     const savedMap = {}; FIELDS.forEach(f => { if (tm.map[f.k] >= 0) savedMap[f.k] = I().normH(tm.headers[tm.map[f.k]]); }); lsSet('velqo_terimamap_' + tm.mp, savedMap);
-    lsSet('velqo_terimaakun', tm.akun); st.kas = tm.kas;
+    lsSet('velqo_terimaakun', tm.akun); lsSet('velqo_terimacol_' + tm.mp, tm.colAkun); st.kas = tm.kas;
     const c = res.counts, lb = label();
     render();
     modal('Penerimaan dicatat', `<div class="cards"><div class="card"><div class="l">Pesanan dilunasi</div><div class="v ok">${done}</div></div><div class="card"><div class="l">Dana cair</div><div class="v">${rp(tot)}</div></div></div>
@@ -307,7 +328,7 @@
 
   function terimaModal() {
     const now = today();
-    tm = { mp: 'shopee', custom: '', file: '', sheets: null, si: 0, headers: [], data: [], hdr: 0, map: {}, sel: {}, dateMode: 'file', date: now, akun: {}, kas: '', err: '', res: null };
+    tm = { mp: 'shopee', custom: '', file: '', sheets: null, si: 0, headers: [], data: [], hdr: 0, map: {}, sel: {}, dateMode: 'file', date: now, akun: {}, colAkun: {}, kas: '', err: '', res: null };
     defaults(); draw();
   }
   window.terimaModal = terimaModal;

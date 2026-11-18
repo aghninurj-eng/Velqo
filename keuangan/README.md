@@ -94,6 +94,7 @@ Di tab **Penjualan** klik **⬇ Terima Dana Marketplace**, lalu pilih file pengh
 - Bila pendapatan di file berbeda dari faktur, selisih masuk akun "Selisih Penjualan Marketplace". Selisih besar ditandai **Periksa** dan tidak dipilih otomatis.
 - Pesanan retur/batal tanpa dana dan faktur yang sudah lunas dilewati. File yang sama aman diunggah ulang, tidak akan dobel.
 - Akun yang disarankan (1210 Saldo Shopee, 1220 Saldo TikTok Shop, 5610 sampai 5690) dibuat otomatis saat disimpan bila belum ada. Akun bisa diganti di pengaturan sebelum disimpan.
+- **Akun beban potongan dipilih sendiri:** bagian "Akun beban untuk potongan marketplace" (terbuka bawaan) memuat akun tiap kelompok (komisi, komisi affiliate, layanan, ongkir, voucher/iklan, pajak, lain-lain, selisih), dan pilihannya diingat. Di bawahnya ada tabel kolom potongan yang berisi angka di file; tiap kolom bisa diarahkan ke akun beban tertentu (mis. kolom komisi affiliate atau iklan ke akun Anda sendiri), disimpan per marketplace menurut nama kolom. Ringkasan pratinjau menampilkan akun tujuan tiap kelompok.
 - Disimpan per 40 pesanan. Perlu **Code.gs versi 5** agar faktur dan jurnal tersimpan bersamaan. Dengan versi lama tetap jalan tapi lebih lambat dan tidak seatomik itu. Perbarui seperti biasa: tempel Code.gs, lalu Deploy, Manage deployments, New version.
 
 ## Memperbarui Apps Script (wajib setelah fitur persediaan)
