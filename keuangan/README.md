@@ -141,6 +141,16 @@ Setiap edit dan hapus tercatat di sheet **Log** (waktu, aksi, nomor, ringkasan p
 
 Belum bisa diedit: penyesuaian stok, jurnal penyusutan, dan faktur yang asetnya sudah disusutkan.
 
+## Pesanan sampel / affiliate
+
+Untuk pesanan marketplace yang barangnya dikirim gratis ke affiliate dan pembelinya hanya membayar ongkir. Pesanan seperti ini bukan penjualan: tidak ada pendapatan dan tidak ada piutang. Tidak perlu memperbarui Code.gs.
+
+- **Pencatatan:** faktur sampel bernomor `SMP/YYYYMM/NNNN` dengan total Rp 0. Stok berkurang dan modal rata-rata barang dicatat sebagai **5750 Beban Sampel & Affiliate** (bukan HPP, jadi laba kotor penjualan tidak terdistorsi). Faktur sampel diberi tanda 🎁 di daftar.
+- **Otomatis saat impor:** di Impor Pesanan, bagian Pengaturan, pesanan yang nilai barangnya sampai Rp ... (bawaan Rp 0) dicatat sebagai sampel. Di pratinjau tiap pesanan punya kotak **Sampel / affiliate** untuk menandai atau membatalkan tanda secara manual (mis. pesanan sampel yang masih bernilai Rp 1.000).
+- **Manual:** tombol **🎁 Pesanan sampel** di tab Penjualan (marketplace, nomor pesanan, penerima, barang dan jumlah; bundel juga bisa dipilih). Untuk faktur penjualan yang sudah terlanjur masuk sebagai penjualan, buka detailnya dan klik **Jadikan sampel** (hanya bila belum ada pembayaran atau retur): pendapatan dibatalkan dan nomornya berganti ke SMP.
+- **Dana ongkir:** di Terima Dana Marketplace, pesanan sampel dikenali dari nomornya. Dana yang cair (biasanya hanya ongkir) dicatat Dr Saldo marketplace, Cr Beban Ongkos Kirim; bila dananya negatif, sebaliknya. Dana yang sudah dicatat dilewati bila file diulang.
+- **Batasan:** pesanan sampel tidak bisa diedit (hapus lalu catat ulang) dan tidak bisa diretur. Faktur sampel yang sudah punya penerimaan dana harus dihapus penerimaannya dulu. Butuh fitur Persediaan aktif karena stok dikurangi dari sana.
+
 ## Retur penjualan
 
 Di detail faktur penjualan, tombol **Retur** mencatat barang atau nilai yang dikembalikan pelanggan. Tidak perlu memperbarui Code.gs.

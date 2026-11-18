@@ -112,9 +112,15 @@
       if (SCI.test(no)) { o.state = 'err'; o.msg = 'Nomor pesanan rusak (Excel memotong digit). Ekspor ulang sebagai CSV.'; res.counts.err++; continue; }
       if (isNaN(net) || isNaN(rev)) { o.state = 'err'; o.msg = 'Jumlah tidak terbaca'; res.counts.err++; continue; }
       const f = keys.get(lb + ' #' + no);
-      if (!f) { o.state = 'nof'; o.msg = 'Faktur belum ada. Impor pesanan dulu.'; res.counts.nof++; continue; }
+      if (!f) { o.state = 'nof'; o.msg = 'Faktur belum ada. Impor pesanan dulu. Bila ini pesanan sampel/affiliate yang tidak terbaca impor, catat lewat tombol "Pesanan sampel".'; res.counts.nof++; continue; }
       o.f = f; o.sisa = rnd(f.total - f.terbayar);
       if (done.has('Dana ' + lb + ' #' + no)) { o.state = 'dup'; o.msg = 'Dana sudah pernah dicatat'; res.counts.dup++; continue; }
+      if (isSampel(f)) { // pesanan sampel/affiliate: tidak ada piutang; dana yang cair hanya ongkir dan dicatat sebagai pengurang/penambah beban ongkir
+        o.smp = true; o.sisa = 0;
+        if (!o.net) { o.state = 'zero'; o.msg = 'Sampel: tidak ada dana cair'; res.counts.zero++; continue; }
+        o.fee = -o.net; o.exp = { ongkir: -o.net }; o.sel = 0; o.msg = 'Sampel / affiliate: dana ongkir ' + (o.net > 0 ? 'masuk' : 'keluar') + ' ' + rp(Math.abs(o.net));
+        res.counts.ok++; o.on = tm.sel[no] !== undefined ? tm.sel[no] : true; continue;
+      }
       if (o.sisa <= 0) { o.state = 'lunas'; o.msg = 'Faktur sudah lunas'; res.counts.lunas++; continue; }
       if (o.net <= 0 && o.rev <= 0) { o.state = 'zero'; o.msg = 'Tidak ada dana cair (retur / batal)'; res.counts.zero++; continue; }
       if (o.net < 0 || o.rev < 0 || o.net > o.rev) { o.state = 'err'; o.msg = 'Angka tidak wajar (dana cair lebih besar dari pendapatan atau negatif)'; res.counts.err++; continue; }
@@ -256,7 +262,7 @@
     const add = (kode, v) => { if (!v) return; const l = lines.find(x => x.kode === kode); if (l) { l.debit += v > 0 ? v : 0; l.kredit += v < 0 ? -v : 0; } else lines.push({ kode, debit: v > 0 ? v : 0, kredit: v < 0 ? -v : 0 }); };
     add(tm.kas, o.net);
     for (const k in o.exp) add(tm.akun[k], o.exp[k]);
-    lines.push({ kode: AK.piutang, kredit: o.sisa });
+    if (o.sisa) lines.push({ kode: AK.piutang, kredit: o.sisa });
     const nomor = nextNo('RCV', o.tgl, ctx);
     const rows = jurnalRows({ tanggal: o.tgl, nomor, keterangan: 'Dana ' + lb + ' #' + o.no, sumber: 'RCV', ref: o.f.id, lines });
     ctx.push(...rows);
@@ -279,7 +285,7 @@
       const ctx = [];
       for (let i = 0; i < list.length; i += CH) {
         const part = list.slice(i, i + CH), jr = [], ups = [];
-        part.forEach(o => { jr.push(...buildOrder(o, ctx)); ups.push({ sheet: 'Faktur', field: 'id', value: o.f.id, patch: { terbayar: o.f.total } }); });
+        part.forEach(o => { jr.push(...buildOrder(o, ctx)); if (!o.smp) ups.push({ sheet: 'Faktur', field: 'id', value: o.f.id, patch: { terbayar: o.f.total } }); });
         btn.textContent = 'Menyimpan ' + Math.min(i + CH, list.length) + ' / ' + list.length + '…';
         await Store.appendMany({ Akun: i === 0 ? newAk : [], Jurnal: jr }, ups);
         ctx.length = 0; // nomor sudah tercatat di S.Jurnal, jangan dihitung ganda
