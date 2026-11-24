@@ -520,18 +520,20 @@ function kasForm(jenis, k) {
 
 function pFaktur(jenis) {
   const sales = jenis === 'penjualan', q = (st.q[jenis] || '').toLowerCase();
+  if (sales && window.salesPage) { const v = salesPage(); if (v) return v; }
   const all = S.Faktur.filter(f => f.jenis === jenis);
-  const list = all.filter(f => !q || (f.pihak + f.nomor + f.keterangan).toLowerCase().includes(q)).sort((a, b) => b.tanggal.localeCompare(a.tanggal) || b.nomor.localeCompare(a.nomor));
+  const list = all.filter(f => (!q || (f.pihak + f.nomor + f.keterangan).toLowerCase().includes(q)) && (!sales || !window.salesInRange || salesInRange(f.tanggal))).sort((a, b) => b.tanggal.localeCompare(a.tanggal) || b.nomor.localeCompare(a.nomor));
   const open = all.reduce((x, f) => x + f.total - f.terbayar, 0);
   const od = all.filter(f => fakturStatus(f)[0] === 'Jatuh tempo').reduce((x, f) => x + f.total - f.terbayar, 0);
   const tot = all.filter(f => f.tanggal >= monthStart() && f.tanggal <= monthEnd()).reduce((x, f) => x + f.total, 0);
-  return `<h2>${sales ? 'Penjualan' : 'Pembelian'}</h2><p class="fin-sub">${sales ? 'Faktur penjualan dan penerimaan pembayaran (piutang)' : 'Faktur pembelian dan pembayaran ke pemasok (hutang)'}</p>
+  return `<h2>${sales ? 'Penjualan' : 'Pembelian'}</h2><p class="fin-sub">${sales ? 'Faktur penjualan, pembayaran yang diterima, dan retur' : 'Faktur pembelian dan pembayaran ke pemasok (hutang)'}</p>${sales && window.salesTabs ? salesTabs() : ''}
   <div class="cards"><div class="card"><div class="l">Total bulan ini</div><div class="v">${rp(tot)}</div></div><div class="card"><div class="l">${sales ? 'Belum diterima' : 'Belum dibayar'}</div><div class="v">${rp(open)}</div></div><div class="card"><div class="l">Jatuh tempo</div><div class="v ${od ? 'bad' : ''}">${rp(od)}</div></div></div>
   <div class="bar"><button class="pri" id="addf">+ Faktur ${sales ? 'Penjualan' : 'Pembelian'}</button>${sales ? '<button id="impm">⬆ Impor dari Marketplace</button><button id="smpn">🎁 Pesanan sampel</button><button id="trm">⬇ Terima Dana Marketplace</button>' : ''}<span class="sp"></span><input id="q" placeholder="Cari nomor / ${sales ? 'pelanggan' : 'pemasok'}…" value="${esc(st.q[jenis] || '')}"></div>
   <div class="panel" style="padding:0">${list.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>${sales ? 'Pelanggan' : 'Pemasok'}</th><th>Jatuh tempo</th><th class="r">Total</th><th class="r">Sisa</th><th>Status</th></tr>
   ${list.map(f => { const [t, c] = fakturStatus(f); return `<tr class="rowc" data-f="${f.id}"><td>${tgl(f.tanggal)}</td><td>${esc(f.nomor)} ${buktiBadge('faktur', f.id)} ${returBadge(f.id)} ${sampelBadge(f)}</td><td>${esc(f.pihak)}<div class="mut">${esc(f.keterangan)}</div></td><td>${tgl(f.jatuh_tempo)}</td><td class="r">${rp(f.total)}</td><td class="r">${rp(f.total - f.terbayar)}</td><td><span class="tag ${c}">${t}</span></td></tr>`; }).join('')}</table>` : empty('Belum ada faktur')}</div>`;
 }
 function bindFaktur(jenis) {
+  if (jenis === 'penjualan' && window.bindSalesTabs && bindSalesTabs()) return;
   $('#addf').onclick = () => fakturForm(jenis);
   if ($('#smpn')) $('#smpn').onclick = () => sampelForm();
   if ($('#impm')) $('#impm').onclick = () => (window.imporModal ? window.imporModal() : toast('Modul impor belum termuat, muat ulang halaman', true));
