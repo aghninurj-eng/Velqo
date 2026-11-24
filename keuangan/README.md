@@ -153,6 +153,14 @@ Untuk pesanan marketplace yang barangnya dikirim gratis ke affiliate dan pembeli
 - **Dana ongkir:** di Terima Dana Marketplace, pesanan sampel dikenali dari nomornya. Dana yang cair (biasanya hanya ongkir) dicatat Dr Saldo marketplace, Cr Beban Ongkos Kirim; bila dananya negatif, sebaliknya. Dana yang sudah dicatat dilewati bila file diulang.
 - **Batasan:** pesanan sampel tidak bisa diedit (hapus lalu catat ulang) dan tidak bisa diretur. Faktur sampel yang sudah punya penerimaan dana harus dihapus penerimaannya dulu. Butuh fitur Persediaan aktif karena stok dikurangi dari sana.
 
+## Tab Penjualan: Penjualan, Pembayaran, Retur
+
+Tab **Penjualan** punya tiga tampilan terpisah di bagian atas:
+- **Penjualan:** daftar faktur penjualan (termasuk pesanan sampel), seperti sebelumnya.
+- **Pembayaran:** satu baris per penerimaan faktur penjualan, termasuk dana marketplace: tanggal, nomor penerimaan, faktur dan pelanggan, rekening tujuan, dana diterima, potongan marketplace, dan tagihan yang dilunasi, lengkap dengan total. Tombol Terima Dana Marketplace ada di sini.
+- **Retur:** satu baris per retur: barang (dan kondisinya), nilai retur, bagian yang mengurangi tagihan, dan refund.
+- Filter **Dari / Sampai** berlaku di ketiga tampilan (kosong = semua tanggal), dan ada kolom cari. Klik baris untuk membuka faktur terkait. Datanya dibaca dari Jurnal, jadi selalu sama dengan buku besar. Tidak perlu memperbarui Code.gs.
+
 ## Retur penjualan
 
 Di detail faktur penjualan, tombol **Retur** mencatat barang atau nilai yang dikembalikan pelanggan. Tidak perlu memperbarui Code.gs.
