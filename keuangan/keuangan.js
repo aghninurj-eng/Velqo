@@ -468,7 +468,7 @@ const akunOpts = (filter = () => true) => S.Akun.filter(filter).sort((a, b) => a
 const empty = t => `<div class="empty">${t}</div>`;
 
 /* ============ HALAMAN ============ */
-const st = { q: {}, kas: null, tab: 'labarugi', from: monthStart(), to: monthEnd(), bb: '', jsrc: '' };
+const st = { q: {}, kas: null, kf: '', kt: '', kq: '', tab: 'labarugi', from: monthStart(), to: monthEnd(), bb: '', jsrc: '' };
 
 function pDashboard() {
   const m = sums(null, null), mb = sums(monthStart(), monthEnd());
@@ -509,14 +509,25 @@ function pKasBank() {
   const m = sums(null, null);
   const cards = ak.map(a => `<div class="card click ${a.kode === st.kas ? 'sel' : ''}" data-kas="${a.kode}"><div class="l">${esc(a.kode)} · ${esc(a.nama)}</div><div class="v">${rp(saldo(a, m))}</div></div>`).join('');
   const rows = S.Jurnal.filter(j => j.kode_akun === st.kas).sort((a, b) => a.tanggal.localeCompare(b.tanggal) || a.id.localeCompare(b.id));
-  let run = 0; const withBal = rows.map(j => ({ j, bal: run += j.debit - j.kredit })).reverse();
+  // Saldo berjalan dihitung dari seluruh mutasi, lalu hasilnya disaring menurut tanggal dan kata kunci.
+  let run = 0; const all = rows.map(j => ({ j, bal: run += j.debit - j.kredit }));
+  const kq = st.kq.trim().toLowerCase();
+  const withBal = all.filter(({ j }) => (!st.kf || j.tanggal >= st.kf) && (!st.kt || j.tanggal <= st.kt) && (!kq || (j.nomor + ' ' + j.keterangan + ' ' + (j.sumber || '')).toLowerCase().includes(kq))).reverse();
+  const filtered = !!(st.kf || st.kt || kq), tm = withBal.reduce((x, r) => x + r.j.debit, 0), tk = withBal.reduce((x, r) => x + r.j.kredit, 0);
   return `<h2>Kas &amp; Bank</h2><p class="fin-sub">Mutasi per rekening, otomatis dari jurnal (termasuk pembayaran faktur)</p>
   <div class="bar"><button class="pri" data-k="masuk">+ Kas Masuk</button><button class="pri" data-k="keluar">+ Kas Keluar</button><button data-k="transfer">⇄ Transfer</button></div>
   <div class="cards">${cards || empty('Belum ada akun dengan kategori "Kas & Bank"')}</div>
-  <div class="panel"><h3>Mutasi ${st.kas ? esc(akunNama(st.kas)) : ''}</h3>${withBal.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>Keterangan</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Saldo</th><th></th></tr>
-  ${withBal.map(({ j, bal }) => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(j.keterangan)}</td><td class="r ok">${j.debit ? rp(j.debit) : ''}</td><td class="r bad">${j.kredit ? rp(j.kredit) : ''}</td><td class="r">${rp(bal)}</td><td>${['KM', 'KK', 'TF'].includes(j.sumber) ? `<button class="sm" data-bk="${esc(j.ref)}" title="Bukti transaksi">📎${docsOf('kas', j.ref).length || ''}</button> <button class="sm" data-edk="${esc(j.ref)}">Edit</button> <button class="sm dan" data-delk="${esc(j.ref)}">Hapus</button>` : ''}</td></tr>`).join('')}</table>` : empty('Belum ada mutasi')}</div>`;
+  <div class="bar"><label class="mut">Dari <input type="date" id="kf" value="${st.kf}"></label><label class="mut">Sampai <input type="date" id="kt" value="${st.kt}"></label>
+  <input id="kq" placeholder="Cari nomor / keterangan…" value="${esc(st.kq)}">${filtered ? '<button id="kreset">Reset</button>' : ''}<span class="sp"></span><button id="kxls">Unduh Excel</button></div>
+  <div class="panel"><h3>Mutasi ${st.kas ? esc(akunNama(st.kas)) : ''}${filtered ? ` <span class="mut" style="font-weight:400">· ${withBal.length} dari ${all.length} transaksi · masuk ${rp(tm)} · keluar ${rp(tk)}</span>` : ''}</h3>${withBal.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>Keterangan</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Saldo</th><th></th></tr>
+  ${withBal.map(({ j, bal }) => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(j.keterangan)}</td><td class="r ok">${j.debit ? rp(j.debit) : ''}</td><td class="r bad">${j.kredit ? rp(j.kredit) : ''}</td><td class="r">${rp(bal)}</td><td>${['KM', 'KK', 'TF'].includes(j.sumber) ? `<button class="sm" data-bk="${esc(j.ref)}" title="Bukti transaksi">📎${docsOf('kas', j.ref).length || ''}</button> <button class="sm" data-edk="${esc(j.ref)}">Edit</button> <button class="sm dan" data-delk="${esc(j.ref)}">Hapus</button>` : ''}</td></tr>`).join('')}</table>` : empty(filtered ? 'Tidak ada mutasi yang cocok dengan filter' : 'Belum ada mutasi')}</div>`;
 }
 function bindKasBank() {
+  $('#kf').onchange = e => { st.kf = e.target.value; render(); };
+  $('#kt').onchange = e => { st.kt = e.target.value; render(); };
+  $('#kq').oninput = e => { st.kq = e.target.value; const p = e.target.selectionStart; render(); const el = $('#kq'); el.focus(); el.setSelectionRange(p, p); };
+  if ($('#kreset')) $('#kreset').onclick = () => { st.kf = st.kt = st.kq = ''; render(); };
+  $('#kxls').onclick = () => (window.eksporKas ? window.eksporKas() : toast('Modul Excel belum termuat, muat ulang halaman', true));
   $$('[data-kas]').forEach(el => el.onclick = () => { st.kas = el.dataset.kas; render(); });
   $$('[data-k]').forEach(el => el.onclick = () => kasForm(el.dataset.k));
   $$('[data-bk]').forEach(el => el.onclick = () => { const k = S.KasBank.find(x => x.id === el.dataset.bk); buktiModal('kas', el.dataset.bk, k ? k.nomor : ''); });
@@ -752,7 +763,7 @@ function pPersediaan() {
   return `<h2>Persediaan</h2><p class="fin-sub">Stok dan nilai barang. Bertambah otomatis dari Pembelian dan berkurang dari Penjualan (nilai rata-rata bergerak).</p>
   <div class="cards"><div class="card"><div class="l">Nilai persediaan</div><div class="v">${rp(total)}</div></div><div class="card"><div class="l">Jumlah produk</div><div class="v">${S.Produk.length}</div></div><div class="card"><div class="l">Stok menipis / habis</div><div class="v ${low ? 'bad' : ''}">${low}</div></div></div>
   ${Math.abs(neraca - total) >= 1 ? `<div class="note">Nilai di Neraca (akun 1500 Persediaan, ${rp(neraca)}) berbeda ${rp(neraca - total)} dari total nilai stok. Biasanya karena jurnal manual ke akun 1500 atau transaksi sebelum fitur persediaan dipakai.</div>` : ''}
-  <div class="bar"><button class="pri" id="addp">+ Produk</button><button id="adj">Penyesuaian stok</button><span class="sp"></span><input id="q" placeholder="Cari kode / nama produk…" value="${esc(st.q.persediaan || '')}"></div>
+  <div class="bar"><button class="pri" id="addp">+ Produk</button><button id="adj">Penyesuaian stok</button><span class="sp"></span><button id="pxls">Unduh Excel</button><input id="q" placeholder="Cari kode / nama produk…" value="${esc(st.q.persediaan || '')}"></div>
   <div class="panel" style="padding:0">${rows.length ? `<table><tr><th>Kode</th><th>Produk</th><th>Satuan</th><th class="r">Stok</th><th class="r">Harga rata-rata</th><th class="r">Nilai</th><th>Status</th></tr>
   ${rows.map(r => { const habis = r.qty <= EPS, tipis = !habis && r.p.stok_min > 0 && r.qty <= r.p.stok_min; return `<tr class="rowc" data-p="${esc(r.p.id)}"><td>${esc(r.p.kode)}</td><td>${esc(r.p.nama)}</td><td>${esc(r.p.satuan)}</td><td class="r">${fq(r.qty)}</td><td class="r">${r.qty > EPS ? rp(r.avg) : '-'}</td><td class="r">${rp(r.nilai)}</td><td>${habis ? '<span class="tag bad">Habis</span>' : tipis ? '<span class="tag warn">Menipis</span>' : '<span class="tag ok">Tersedia</span>'}</td></tr>`; }).join('')}
   <tr class="t"><td colspan="5">Total nilai persediaan</td><td class="r">${rp(rows.reduce((a, r) => a + r.nilai, 0))}</td><td></td></tr></table>`
@@ -762,6 +773,7 @@ function bindPersediaan() {
   if (!Store.invReady) return;
   $('#addp').onclick = () => produkForm();
   $('#adj').onclick = () => adjForm();
+  $('#pxls').onclick = () => (window.eksporPersediaan ? window.eksporPersediaan() : toast('Modul Excel belum termuat, muat ulang halaman', true));
   $('#q').oninput = e => { st.q.persediaan = e.target.value; const p = e.target.selectionStart; render(); const el = $('#q'); el.focus(); el.setSelectionRange(p, p); };
   $$('[data-p]').forEach(el => el.onclick = () => kartuStok(el.dataset.p));
 }
@@ -774,7 +786,8 @@ function kartuStok(id) {
     ${moves.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>Jenis</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Nilai</th><th class="r">Saldo qty</th><th class="r">Saldo nilai</th><th></th></tr>
     ${moves.map(x => { rq_ = rq(rq_ + x.qty); rn += x.nilai; return `<tr><td>${tgl(x.tanggal)}</td><td>${esc(x.nomor)}<div class="mut">${esc(x.keterangan)}</div></td><td><span class="tag">${jenisTag[x.jenis] || esc(x.jenis)}</span></td><td class="r ok">${x.qty > 0 ? fq(x.qty) : ''}</td><td class="r bad">${x.qty < 0 ? fq(-x.qty) : ''}</td><td class="r">${rp(x.nilai)}</td><td class="r">${fq(rq_)}</td><td class="r">${rp(rn)}</td><td>${x.jenis === 'adj' ? `<button class="sm dan" data-dadj="${esc(x.ref)}">Hapus</button>` : ''}</td></tr>`; }).join('')}</table>` : empty('Belum ada mutasi untuk produk ini')}`;
   modal(p.kode + ' · ' + p.nama, body,
-    `${moves.length || S.FakturItem.some(i => i.produk_id === id) ? '' : '<button class="dan" id="dp" style="margin-right:auto">Hapus produk</button>'}<button id="ep">Ubah produk</button><button id="ap">Penyesuaian stok</button><button data-close>Tutup</button>`, true);
+    `${moves.length || S.FakturItem.some(i => i.produk_id === id) ? '' : '<button class="dan" id="dp" style="margin-right:auto">Hapus produk</button>'}<button id="ep">Ubah produk</button><button id="ap">Penyesuaian stok</button><button id="xp">Unduh Excel</button><button data-close>Tutup</button>`, true);
+  $('#xp').onclick = () => (window.eksporPersediaan ? window.eksporPersediaan(id) : toast('Modul Excel belum termuat, muat ulang halaman', true));
   $('#ep').onclick = () => produkForm(p);
   $('#ap').onclick = () => adjForm(id);
   if ($('#dp')) $('#dp').onclick = () => { if (confirm('Hapus produk ' + p.nama + '?')) run(() => hapusProduk(id), 'Produk dihapus'); };

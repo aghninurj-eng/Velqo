@@ -173,5 +173,73 @@
       '<button data-close>Batal</button><button class="pri" id="xgo">Unduh</button>');
     $('#xgo').onclick = () => { const v = (new FormData($('#xf'))).get('lap') || 'semua'; dlg.close(); unduh(v); };
   }
+
+  /* Persediaan: lembar "Stok" (posisi per produk) dan "Mutasi Stok" (kartu stok semua produk dengan saldo berjalan).
+     Dengan produkId, hanya produk itu yang diunduh. */
+  function eksporPersediaan(produkId) {
+    if (!window.VelqoXlsx) return toast('Modul Excel belum termuat, muat ulang halaman', true);
+    try {
+      const wb = new VelqoXlsx.Book(), m = stokMap();
+      const prods = S.Produk.filter(p => !produkId || p.id === produkId).sort((a, b) => a.kode.localeCompare(b.kode));
+      const jenisTag = { beli: 'Pembelian', jual: 'Penjualan', adj: 'Penyesuaian', retur: 'Retur penjualan', rusak: 'Retur rusak' };
+      const sh = wb.sheet('Stok', { cols: [14, 40, 10, 12, 18, 18, 14], freeze: 6 });
+      header(sh, 7, 'Persediaan' + (produkId && prods[0] ? ' · ' + prods[0].nama : ''), 'Posisi per ' + fmtTgl(today()));
+      sh.row([{ v: 'Kode', s: sty.head }, { v: 'Produk', s: sty.head }, { v: 'Satuan', s: sty.head }, { v: 'Stok', s: sty.headR }, { v: 'Harga rata-rata', s: sty.headR }, { v: 'Nilai (Rp)', s: sty.headR }, { v: 'Status', s: sty.head }]);
+      const first = sh.n + 1; let tn = 0;
+      prods.forEach(p => {
+        const o = stokOf(p.id, m), habis = o.qty <= EPS, tipis = !habis && p.stok_min > 0 && o.qty <= p.stok_min, nl = Math.round(o.nilai); tn += nl;
+        sh.row([{ v: p.kode, s: sty.itemKode }, { v: p.nama, s: sty.item }, { v: p.satuan, s: sty.item }, { v: +o.qty.toFixed(4), s: { ...sty.num, nf: '#,##0.####' } }, { v: o.qty > EPS ? Math.round(o.avg) : 0, s: sty.num }, { v: nl, s: sty.num }, { v: habis ? 'Habis' : tipis ? 'Menipis' : 'Tersedia', s: sty.item }]);
+      });
+      const last = sh.n;
+      sh.row([{ v: '', s: sty.grand }, { v: 'Total nilai persediaan', s: sty.grand }, { v: '', s: sty.grand }, { v: '', s: sty.grand }, { v: '', s: sty.grand }, prods.length ? { f: `SUM(F${first}:F${last})`, v: tn, s: sty.grandN } : { v: 0, s: sty.grandN }, { v: '', s: sty.grand }]);
+
+      const mv = wb.sheet('Mutasi Stok', { cols: [12, 14, 36, 16, 14, 14, 16, 16, 18], freeze: 6, landscape: true });
+      header(mv, 9, 'Mutasi Stok (Kartu Stok)', 'Semua pergerakan stok, dicetak ' + fmtTgl(today()));
+      mv.row([{ v: 'Tanggal', s: sty.head }, { v: 'Nomor', s: sty.head }, { v: 'Keterangan', s: sty.head }, { v: 'Jenis', s: sty.head }, { v: 'Masuk', s: sty.headR }, { v: 'Keluar', s: sty.headR }, { v: 'Nilai (Rp)', s: sty.headR }, { v: 'Saldo qty', s: sty.headR }, { v: 'Saldo nilai (Rp)', s: sty.headR }]);
+      let n = 0; const qf = { ...sty.num, nf: '#,##0.####' };
+      prods.forEach(p => {
+        const rows = S.Stok.filter(x => x.produk_id === p.id).sort((a, b) => a.tanggal.localeCompare(b.tanggal));
+        if (!rows.length) return;
+        if (n++) mv.blank();
+        mv.row([{ v: p.kode + ' · ' + p.nama + '  (' + p.satuan + ')', s: sty.sect, span: 9 }]);
+        let rqty = 0, rnil = 0;
+        rows.forEach(x => {
+          rqty = rq(rqty + x.qty); rnil += x.nilai;
+          mv.row([{ d: x.tanggal, s: { bottom: 'hair', bc: 'D5DDD9' } }, { v: x.nomor, s: sty.itemKode }, { v: x.keterangan || '', s: sty.item }, { v: jenisTag[x.jenis] || x.jenis, s: sty.item },
+            { v: x.qty > 0 ? +x.qty.toFixed(4) : '', s: qf }, { v: x.qty < 0 ? +(-x.qty).toFixed(4) : '', s: qf }, { v: Math.round(x.nilai), s: sty.num }, { v: +rqty.toFixed(4), s: qf }, { v: Math.round(rnil), s: sty.num }]);
+        });
+      });
+      if (!n) mv.row([{ v: 'Belum ada mutasi stok.', s: sty.note, span: 9 }]);
+      wb.download('Velqo-Persediaan' + (produkId && prods[0] ? '-' + prods[0].kode : '') + '-' + today() + '.xlsx');
+      toast('File Excel diunduh');
+    } catch (e) { console.error(e); toast('Gagal membuat file Excel: ' + (e.message || e), true); }
+  }
+
+  // Kas & Bank: mutasi rekening yang sedang dipilih, mengikuti filter tanggal dan pencarian di layar, dengan saldo awal.
+  function eksporKas() {
+    if (!window.VelqoXlsx) return toast('Modul Excel belum termuat, muat ulang halaman', true);
+    const a = akunBy(st.kas); if (!a) return toast('Pilih rekening kas/bank dulu', true);
+    try {
+      const rows = S.Jurnal.filter(j => j.kode_akun === a.kode).sort((x, y) => x.tanggal.localeCompare(y.tanggal) || x.id.localeCompare(y.id));
+      const kq = st.kq.trim().toLowerCase(), before = rows.filter(j => st.kf && j.tanggal < st.kf).reduce((x, j) => x + j.debit - j.kredit, 0);
+      const sel_ = rows.filter(j => (!st.kf || j.tanggal >= st.kf) && (!st.kt || j.tanggal <= st.kt) && (!kq || (j.nomor + ' ' + j.keterangan + ' ' + (j.sumber || '')).toLowerCase().includes(kq)));
+      const wb = new VelqoXlsx.Book(), sh = wb.sheet('Mutasi Kas', { cols: [12, 20, 46, 16, 16, 18], freeze: 6 });
+      header(sh, 6, 'Mutasi ' + a.kode + ' · ' + a.nama, (st.kf || st.kt ? 'Periode ' + (st.kf ? fmtTgl(st.kf) : 'awal') + ' s/d ' + (st.kt ? fmtTgl(st.kt) : 'sekarang') : 'Semua periode') + (kq ? ' · pencarian "' + st.kq.trim() + '"' : ''));
+      sh.row([{ v: 'Tanggal', s: sty.head }, { v: 'Nomor', s: sty.head }, { v: 'Keterangan', s: sty.head }, { v: 'Masuk (Rp)', s: sty.headR }, { v: 'Keluar (Rp)', s: sty.headR }, { v: 'Saldo (Rp)', s: sty.headR }]);
+      let run = Math.round(before), prev;
+      if (st.kf && !kq) prev = sh.row([{ v: '', s: sty.item }, { v: '', s: sty.item }, { v: 'Saldo awal', s: { i: true, indent: 1, bottom: 'hair', bc: 'D5DDD9' } }, { v: '', s: sty.num }, { v: '', s: sty.num }, { v: run, s: sty.num }]);
+      // Bila disaring kata kunci, saldo berjalan tetap saldo rekening sebenarnya (bukan hanya baris yang cocok).
+      const first = sh.n + 1; let td = 0, tk = 0;
+      const all = rows.map(j => ({ j, bal: 0 })); let b = 0; all.forEach(r => { b += r.j.debit - r.j.kredit; r.bal = b; });
+      const balOf = new Map(all.map(r => [r.j.id, r.bal]));
+      sel_.forEach(j => { td += j.debit; tk += j.kredit; sh.row([{ d: j.tanggal, s: { bottom: 'hair', bc: 'D5DDD9' } }, { v: j.nomor, s: sty.itemKode }, { v: j.keterangan, s: { bottom: 'hair', bc: 'D5DDD9' } }, { v: Math.round(j.debit) || '', s: sty.num }, { v: Math.round(j.kredit) || '', s: sty.num }, { v: Math.round(balOf.get(j.id)), s: sty.num }]); });
+      const last = sh.n;
+      sh.row([{ v: '', s: sty.grand }, { v: '', s: sty.grand }, { v: 'Total', s: sty.grand }, sel_.length ? { f: `SUM(D${first}:D${last})`, v: Math.round(td), s: sty.grandN } : { v: 0, s: sty.grandN }, sel_.length ? { f: `SUM(E${first}:E${last})`, v: Math.round(tk), s: sty.grandN } : { v: 0, s: sty.grandN }, { v: sel_.length ? Math.round(balOf.get(sel_[sel_.length - 1].id)) : run, s: sty.grandN }]);
+      void prev;
+      wb.download('Velqo-Kas-' + a.kode + '-' + today() + '.xlsx');
+      toast('File Excel diunduh');
+    } catch (e) { console.error(e); toast('Gagal membuat file Excel: ' + (e.message || e), true); }
+  }
+  window.eksporPersediaan = eksporPersediaan; window.eksporKas = eksporKas;
   window.eksporExcel = eksporExcel;
 })();
