@@ -189,3 +189,8 @@ Setiap faktur, transaksi kas dan jurnal manual bisa diberi bukti berupa foto ata
 ## Pembayaran tercatat ganda
 
 Tombol Simpan sekarang hanya menerima satu klik sampai prosesnya selesai, jadi klik ganda tidak lagi mengirim transaksi dua kali. Bila ada pembayaran yang sudah terlanjur ganda, buka detail fakturnya: muncul catatan merah dengan tombol **Hapus baris jurnal ganda** (hanya muncul bila total kas di jurnal lebih besar dari jumlah terbayar).
+
+## Unduh persediaan dan filter Kas & Bank
+
+- **Persediaan → Unduh Excel**: file berisi lembar *Stok* (posisi, harga rata-rata, nilai, status per produk) dan *Mutasi Stok* (kartu stok semua produk dengan saldo qty dan nilai berjalan). Di jendela kartu stok satu produk ada tombol **Unduh Excel** yang hanya memuat produk itu.
+- **Kas & Bank**: mutasi rekening bisa disaring menurut **Dari/Sampai** tanggal dan kotak **cari** (nomor atau keterangan). Kolom saldo tetap saldo rekening yang sebenarnya, bukan dihitung ulang dari baris yang tampil. Tombol **Unduh Excel** mengikuti filter yang aktif (dengan baris saldo awal bila ada tanggal awal).
