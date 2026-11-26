@@ -39,15 +39,29 @@
     return { total, ref: 'C' + n };
   }
 
+  // Susunan mengikuti format laporan Velqo: Beban Pokok Penjualan terpisah dari Beban Operasional.
   function sheetLabaRugi(wb, from, to) {
-    const sh = wb.sheet('Laba Rugi', { cols: [12, 46, 20] }), r = labaRugi(from, to);
-    header(sh, 3, 'Laporan Laba Rugi', 'Periode ' + fmtTgl(from) + ' s/d ' + fmtTgl(to));
-    sh.row([{ v: 'Kode', s: sty.head }, { v: 'Akun', s: sty.head }, { v: 'Jumlah (Rp)', s: sty.headR }]);
-    const p = section(sh, 'Pendapatan', r.pend, 3); sh.blank();
-    const b = section(sh, 'Beban', r.beban, 3); sh.blank();
-    const laba = p.total - b.total;
-    sh.row([{ v: '', s: sty.grand }, { v: laba >= 0 ? 'Laba Bersih' : 'Rugi Bersih', s: sty.grand }, { f: `${p.ref}-${b.ref}`, v: laba, s: sty.grandN }]);
-    return { pend: p.total, beban: b.total, laba };
+    const sh = wb.sheet('Laba Rugi', { cols: [52, 20] }), r = labaRugi(from, to);
+    sh.row([{ v: 'LAPORAN LABA RUGI', s: sty.title, span: 2 }], { h: 24 });
+    sh.row([{ v: namaUsaha(), s: sty.subb, span: 2 }]);
+    sh.blank();
+    sh.row([{ v: 'Deskripsi', s: sty.head }, { v: periodeLabel(from, to), s: sty.headR }]);
+    const lines = (list) => { const first = sh.n + 1; list.forEach(x => sh.row([{ v: x.nama, s: sty.item }, { v: Math.round(x.s), s: sty.num }])); return [first, sh.n]; };
+    const sec = (t) => sh.row([{ v: t, s: sty.sect, span: 2 }]);
+    const tot = (t, f, v) => sh.row([{ v: t, s: sty.tot }, { f, v, s: sty.totN }]);
+    const R = x => Math.round(x), sm = l => l.reduce((x, y) => x + R(y.s), 0);
+    sec('Pendapatan'); const [p1, p2] = lines(r.dp); const jp = sm(r.dp), np = tot('Jumlah Pendapatan', `SUM(B${p1}:B${p2})`, jp);
+    sh.blank(); sec('BEBAN POKOK PENJUALAN');
+    let jh = 0, nh;
+    if (r.hpp.length) { const [h1, h2] = lines(r.hpp); jh = sm(r.hpp); nh = tot('Jumlah Beban Pokok Penjualan', `SUM(B${h1}:B${h2})`, jh); } else nh = tot('Jumlah Beban Pokok Penjualan', '0', 0);
+    sh.blank(); const kotor = jp - jh;
+    const nk = sh.row([{ v: 'LABA KOTOR', s: sty.grand }, { f: `B${np}-B${nh}`, v: kotor, s: sty.grandN }]);
+    sh.blank(); sec('Beban Operasional');
+    let jo = 0, no;
+    if (r.opr.length) { const [o1, o2] = lines(r.opr); jo = sm(r.opr); no = tot('Jumlah Beban Operasional', `SUM(B${o1}:B${o2})`, jo); } else no = tot('Jumlah Beban Operasional', '0', 0);
+    sh.blank(); const laba = kotor - jo;
+    sh.row([{ v: laba >= 0 ? 'LABA BERSIH' : 'RUGI BERSIH', s: sty.grand }, { f: `B${nk}-B${no}`, v: laba, s: sty.grandN }]);
+    return { pend: jp, hpp: jh, kotor, beban: jh + jo, opr: jo, laba };
   }
 
   function sheetNeraca(wb, to) {
@@ -115,18 +129,18 @@
     if (!n) sh.row([{ v: 'Tidak ada transaksi pada periode ini.', s: sty.note, span: 6 }]);
   }
 
-  function eksporExcel() {
-    if (!window.VelqoXlsx) return toast('Modul Excel belum termuat, muat ulang halaman', true);
-    const from = st.from, to = st.to;
-    if (!from || !to || from > to) return toast('Periode tidak valid: tanggal "Dari" harus sebelum "Sampai"', true);
-    try {
-      const wb = new VelqoXlsx.Book();
+  const LAP = [['semua', 'Semua laporan keuangan (satu file, semua lembar)'], ['labarugi', 'Laba Rugi saja'], ['neraca', 'Neraca saja'], ['saldo', 'Neraca Saldo saja'], ['bukubesar', 'Buku Besar saja']];
+  const NAMA = { labarugi: 'Laba-Rugi', neraca: 'Neraca', saldo: 'Neraca-Saldo', bukubesar: 'Buku-Besar', semua: 'Laporan' };
+
+  function bangun(mode, from, to) {
+    const wb = new VelqoXlsx.Book(), semua = mode === 'semua';
+    let lr, nr;
+    if (semua) {
       const sum0 = wb.sheet('Ringkasan', { cols: [34, 22] });
-      const lr = sheetLabaRugi(wb, from, to), nr = sheetNeraca(wb, to);
-      sheetSaldo(wb, to); sheetBukuBesar(wb, from, to);
+      lr = sheetLabaRugi(wb, from, to); nr = sheetNeraca(wb, to); sheetSaldo(wb, to); sheetBukuBesar(wb, from, to);
       header(sum0, 2, 'Ringkasan Keuangan', 'Laba rugi ' + fmtTgl(from) + ' s/d ' + fmtTgl(to) + ' · Neraca per ' + fmtTgl(to));
       sum0.row([{ v: 'Laba Rugi', s: sty.head }, { v: 'Rp', s: sty.headR }]);
-      [['Pendapatan', lr.pend], ['Beban', lr.beban]].forEach(([t, v]) => sum0.row([{ v: t, s: sty.item }, { v, s: sty.num }]));
+      [['Pendapatan', lr.pend], ['Beban Pokok Penjualan', lr.hpp], ['Laba Kotor', lr.kotor], ['Beban Operasional', lr.opr]].forEach(([t, v]) => sum0.row([{ v: t, s: sty.item }, { v, s: sty.num }]));
       sum0.row([{ v: lr.laba >= 0 ? 'Laba Bersih' : 'Rugi Bersih', s: sty.grand }, { v: lr.laba, s: sty.grandN }]);
       sum0.blank(); sum0.row([{ v: 'Neraca', s: sty.head }, { v: 'Rp', s: sty.headR }]);
       [['Total Aset', nr.aset], ['Total Kewajiban', nr.kew], ['Total Ekuitas', nr.eku]].forEach(([t, v]) => sum0.row([{ v: t, s: sty.item }, { v, s: sty.num }]));
@@ -134,9 +148,30 @@
       sum0.blank(); sum0.row([{ v: 'Posisi kas dan bank', s: sty.head }, { v: 'Rp', s: sty.headR }]);
       kas.sort((x, y) => x.kode.localeCompare(y.kode)).forEach(a => sum0.row([{ v: a.kode + ' · ' + a.nama, s: sty.item }, { v: Math.round(saldo(a, m)), s: sty.num }]));
       sum0.row([{ v: 'Total kas dan bank', s: sty.grand }, { v: Math.round(kasTot), s: sty.grandN }]);
-      wb.download('Velqo-Laporan-' + from + '-sd-' + to + '.xlsx');
+    } else if (mode === 'labarugi') sheetLabaRugi(wb, from, to);
+    else if (mode === 'neraca') sheetNeraca(wb, to);
+    else if (mode === 'saldo') sheetSaldo(wb, to);
+    else sheetBukuBesar(wb, from, to);
+    return wb;
+  }
+
+  function unduh(mode) {
+    if (!window.VelqoXlsx) return toast('Modul Excel belum termuat, muat ulang halaman', true);
+    const from = st.from, to = st.to;
+    if (!from || !to || from > to) return toast('Periode tidak valid: tanggal "Dari" harus sebelum "Sampai"', true);
+    try {
+      bangun(mode, from, to).download('Velqo-' + NAMA[mode] + '-' + (mode === 'neraca' || mode === 'saldo' ? 'per-' + to : from + '-sd-' + to) + '.xlsx');
       toast('File Excel diunduh');
     } catch (e) { console.error(e); toast('Gagal membuat file Excel: ' + (e.message || e), true); }
+  }
+
+  // Tanpa argumen: tampilkan pilihan (semua laporan atau satu laporan). Dengan argumen: langsung unduh.
+  function eksporExcel(mode) {
+    if (mode) return unduh(mode);
+    modal('Unduh Excel', `<form id="xf" class="f"><div class="full"><label>Laporan yang diunduh</label>${LAP.map(([k, t]) => `<label style="display:flex;gap:8px;align-items:center;font-weight:400;margin:6px 0"><input type="radio" name="lap" value="${k}" ${k === 'semua' ? 'checked' : ''} style="width:auto"> ${t}</label>`).join('')}</div>
+      <div class="full mut">Periode: ${fmtTgl(st.from)} s/d ${fmtTgl(st.to)} (sesuai pilihan di halaman Laporan)</div></form>`,
+      '<button data-close>Batal</button><button class="pri" id="xgo">Unduh</button>');
+    $('#xgo').onclick = () => { const v = (new FormData($('#xf'))).get('lap') || 'semua'; dlg.close(); unduh(v); };
   }
   window.eksporExcel = eksporExcel;
 })();
