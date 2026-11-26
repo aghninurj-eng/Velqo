@@ -67,7 +67,11 @@ Belum tercakup: penjualan atau pelepasan aset, dan aset yang sudah dimiliki sebe
 
 ## Unduh laporan ke Excel
 
-Di halaman **Laporan**, pilih periode lalu klik **Unduh Excel**. Satu file `.xlsx` berisi lima lembar: Ringkasan, Laba Rugi, Neraca, Neraca Saldo, dan Buku Besar (semua akun yang bergerak, lengkap dengan saldo awal dan saldo akhir). Tampilannya sudah diformat: judul dan periode, header berwarna, angka berformat ribuan, baris total berupa rumus Excel, panel judul yang membeku, dan siap cetak A4. File dibuat di browser tanpa pustaka luar (`xlsx.js` dan `ekspor.js`).
+Di halaman **Laporan**, pilih periode lalu klik **Unduh Excel**. Akan muncul pilihan: **semua laporan** (satu file) atau **satu laporan saja** (Laba Rugi, Neraca, Neraca Saldo, atau Buku Besar).
+
+**Format Laba Rugi** (layar dan Excel): Pendapatan (penjualan, diskon, retur) → *Beban Pokok Penjualan* (akun HPP, terpisah) → **Laba Kotor** → Beban Operasional (semua beban lain, per akun) → **Laba Bersih**. Akun diskon dikenali dari kata "diskon" pada nama akun pendapatan; retur dari akun 4150. Nama usaha di judul diubah di **Pengaturan → Nama usaha**.
+
+Pilihan semua laporan menghasilkan satu file `.xlsx` berisi lima lembar: Ringkasan, Laba Rugi, Neraca, Neraca Saldo, dan Buku Besar (semua akun yang bergerak, lengkap dengan saldo awal dan saldo akhir). Tampilannya sudah diformat: judul dan periode, header berwarna, angka berformat ribuan, baris total berupa rumus Excel, panel judul yang membeku, dan siap cetak A4. File dibuat di browser tanpa pustaka luar (`xlsx.js` dan `ekspor.js`).
 
 ## Catatan impor pesanan
 

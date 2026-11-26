@@ -212,11 +212,29 @@ function saldo(akun, m) {
   return DEBIT_NORMAL[akun.tipe] ? o.d - o.k : o.k - o.d;
 }
 const byTipe = (t, m) => S.Akun.filter(a => a.tipe === t).sort((a, b) => a.kode.localeCompare(b.kode)).map(a => ({ a, s: saldo(a, m) }));
+const KODE_RETUR = '4150';
+const isHpp = a => a.kode === AK.pembelian || a.kategori === 'HPP';
+const isDiskon = a => a.tipe === 'Pendapatan' && /diskon/i.test(a.nama);
+// Nama usaha di judul laporan (disimpan di browser, diubah di Pengaturan)
+const namaUsaha = () => { try { return localStorage.getItem('velqo_nama') || 'Velqo'; } catch (e) { return 'Velqo'; } };
+const BLN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const periodeLabel = (from, to) => {
+  const [y1, m1, d1] = from.split('-').map(Number), [y2, m2, d2] = to.split('-').map(Number);
+  if (y1 === y2 && m1 === m2) return d1 + '-' + d2 + ' ' + BLN[m2 - 1] + ' ' + y2;
+  return d1 + ' ' + BLN[m1 - 1] + ' ' + y1 + ' - ' + d2 + ' ' + BLN[m2 - 1] + ' ' + y2;
+};
+/* Laba rugi bersusun: Pendapatan (penjualan, diskon, retur) → Beban Pokok Penjualan → Laba Kotor → Beban Operasional → Laba Bersih.
+   pend/beban/tp/tb/laba tetap ada untuk bagian lain (dashboard, neraca). */
 const labaRugi = (from, to) => {
   const m = sums(from, to);
   const pend = byTipe('Pendapatan', m), beban = byTipe('Beban', m);
   const tp = pend.reduce((x, r) => x + r.s, 0), tb = beban.reduce((x, r) => x + r.s, 0);
-  return { pend, beban, tp, tb, laba: tp - tb };
+  const dp = pend.filter(r => r.a.kode !== KODE_RETUR && !isDiskon(r.a) && (r.s || r.a.kode === AK.penjualan)).map(r => ({ nama: r.a.nama, s: r.s }));
+  dp.push({ nama: 'Diskon', s: pend.filter(r => isDiskon(r.a)).reduce((x, r) => x + r.s, 0) });
+  dp.push({ nama: 'Retur', s: pend.filter(r => r.a.kode === KODE_RETUR).reduce((x, r) => x + r.s, 0) });
+  const hpp = beban.filter(r => isHpp(r.a)).map(r => ({ nama: r.a.nama, s: r.s })), opr = beban.filter(r => !isHpp(r.a) && r.s).map(r => ({ nama: r.a.nama, s: r.s }));
+  const sm = l => l.reduce((x, r) => x + r.s, 0), jp = sm(dp), jh = sm(hpp), jo = sm(opr);
+  return { pend, beban, tp, tb, laba: tp - tb, dp, hpp, opr, jp, jh, jo, kotor: jp - jh };
 };
 
 /* Faktur. Jika `items` ([{produk_id, qty, harga}]) diisi:
@@ -884,8 +902,14 @@ function pLaporan() {
   const needFrom = st.tab !== 'neraca' && st.tab !== 'saldo';
   let body = '';
   if (st.tab === 'labarugi') {
-    const r = labaRugi(st.from, st.to), sec = (t, rows, tot) => `<tr class="h"><td colspan="2">${t}</td></tr>${rows.filter(x => x.s).map(x => `<tr><td style="padding-left:22px">${esc(x.a.kode)} · ${esc(x.a.nama)}</td><td class="r">${rp(x.s)}</td></tr>`).join('')}<tr class="t"><td>Total ${t}</td><td class="r">${rp(tot)}</td></tr>`;
-    body = `<table id="rep"><tr><th colspan="2">Laba Rugi ${tgl(st.from)} s/d ${tgl(st.to)}</th></tr>${sec('Pendapatan', r.pend, r.tp)}${sec('Beban', r.beban, r.tb)}<tr class="t"><td>${r.laba >= 0 ? 'Laba' : 'Rugi'} Bersih</td><td class="r ${r.laba < 0 ? 'bad' : 'ok'}">${rp(r.laba)}</td></tr></table>`;
+    const r = labaRugi(st.from, st.to), ln = x => `<tr><td style="padding-left:22px">${esc(x.nama)}</td><td class="r">${rp(x.s)}</td></tr>`,
+      hd = t => `<tr class="h"><td colspan="2">${t}</td></tr>`, tt = (t, v, c) => `<tr class="t"><td>${t}</td><td class="r ${c || ''}">${rp(v)}</td></tr>`;
+    body = `<table id="rep"><tr><th colspan="2">Laporan Laba Rugi ${esc(namaUsaha())} · ${periodeLabel(st.from, st.to)}</th></tr>
+      ${hd('Pendapatan')}${r.dp.map(ln).join('')}${tt('Jumlah Pendapatan', r.jp)}
+      ${hd('Beban Pokok Penjualan')}${r.hpp.map(ln).join('')}${tt('Jumlah Beban Pokok Penjualan', r.jh)}
+      ${tt('Laba Kotor', r.kotor, r.kotor < 0 ? 'bad' : '')}
+      ${hd('Beban Operasional')}${r.opr.map(ln).join('')}${tt('Jumlah Beban Operasional', r.jo)}
+      ${tt(r.laba >= 0 ? 'Laba Bersih' : 'Rugi Bersih', r.laba, r.laba < 0 ? 'bad' : 'ok')}</table>`;
   } else if (st.tab === 'neraca') {
     const m = sums(null, st.to), A = byTipe('Aset', m), K = byTipe('Kewajiban', m), E = byTipe('Ekuitas', m), lr = labaRugi(null, st.to);
     const ta = A.reduce((x, r) => x + r.s, 0), tk = K.reduce((x, r) => x + r.s, 0), te = E.reduce((x, r) => x + r.s, 0) + lr.laba;
@@ -936,9 +960,11 @@ function pPengaturan() {
   <form id="cf" class="f"><div class="full"><label>URL Web App Apps Script (berakhiran /exec)</label><input name="url" value="${esc(saved.url || CONFIG.API_URL)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
   <div class="full"><label>Token (sama dengan TOKEN di Code.gs)</label><input name="token" type="password" value="${esc(saved.token || CONFIG.TOKEN)}" autocomplete="off"></div></form>
   <div class="bar" style="margin-top:12px"><button class="pri" id="svc">Simpan &amp; muat ulang</button><button id="tst">Tes koneksi</button>${Store.live ? '<button id="off">Kembali ke mode demo</button>' : '<button class="dan" id="rst">Reset data demo</button>'}</div></div>
+  <div class="panel"><h3>Nama usaha</h3><div class="bar"><input id="nu" value="${esc(namaUsaha())}" style="max-width:320px"><button id="snu">Simpan</button></div><p class="mut" style="margin:6px 0 0">Tampil di judul Laporan Laba Rugi dan file Excel.</p></div>
   <div class="panel"><h3>Catatan keamanan</h3><p class="mut" style="margin:0">Token disimpan di browser perangkat ini dan dikirim ke Apps Script pada setiap permintaan. Jangan menaruh token asli di file yang dipublikasikan ke repositori GitHub publik; isi lewat halaman ini saja.</p></div>`;
 }
 function bindPengaturan() {
+  $('#snu').onclick = () => { try { localStorage.setItem('velqo_nama', $('#nu').value.trim() || 'Velqo'); toast('Nama usaha disimpan'); } catch (e) { toast('Gagal menyimpan', true); } };
   const get = () => Object.fromEntries(new FormData($('#cf')));
   $('#svc').onclick = () => { const v = get(); localStorage.setItem('velqo_cfg', JSON.stringify({ url: v.url.trim(), token: v.token.trim() })); location.reload(); };
   $('#tst').onclick = async () => { const v = get(); try { const r = await fetch(v.url.trim() + '?action=all&token=' + encodeURIComponent(v.token.trim())); const j = await r.json(); j.ok ? toast('Koneksi berhasil: ' + j.data.Akun.length + ' akun terbaca' + (j.v >= BACKEND_VERSI ? '' : ' (Code.gs lama: perbarui agar fitur terbaru aktif)')) : toast(apiErr(j, 'Gagal'), true); } catch (e) { toast('Gagal terhubung: ' + e.message, true); } };
