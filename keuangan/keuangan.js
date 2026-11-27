@@ -517,14 +517,14 @@ function pKasBank() {
   return `<h2>Kas &amp; Bank</h2><p class="fin-sub">Mutasi per rekening, otomatis dari jurnal (termasuk pembayaran faktur)</p>
   <div class="bar"><button class="pri" data-k="masuk">+ Kas Masuk</button><button class="pri" data-k="keluar">+ Kas Keluar</button><button data-k="transfer">⇄ Transfer</button></div>
   <div class="cards">${cards || empty('Belum ada akun dengan kategori "Kas & Bank"')}</div>
-  <div class="bar"><label class="mut">Dari <input type="date" id="kf" value="${st.kf}"></label><label class="mut">Sampai <input type="date" id="kt" value="${st.kt}"></label>
+  <div class="bar"><label class="mut">Dari <input type="date" id="kdari" value="${st.kf}"></label><label class="mut">Sampai <input type="date" id="ksampai" value="${st.kt}"></label>
   <input id="kq" placeholder="Cari nomor / keterangan…" value="${esc(st.kq)}">${filtered ? '<button id="kreset">Reset</button>' : ''}<span class="sp"></span><button id="kxls">Unduh Excel</button></div>
   <div class="panel"><h3>Mutasi ${st.kas ? esc(akunNama(st.kas)) : ''}${filtered ? ` <span class="mut" style="font-weight:400">· ${withBal.length} dari ${all.length} transaksi · masuk ${rp(tm)} · keluar ${rp(tk)}</span>` : ''}</h3>${withBal.length ? `<table><tr><th>Tanggal</th><th>Nomor</th><th>Keterangan</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Saldo</th><th></th></tr>
   ${withBal.map(({ j, bal }) => `<tr><td>${tgl(j.tanggal)}</td><td>${esc(j.nomor)}</td><td>${esc(j.keterangan)}</td><td class="r ok">${j.debit ? rp(j.debit) : ''}</td><td class="r bad">${j.kredit ? rp(j.kredit) : ''}</td><td class="r">${rp(bal)}</td><td>${['KM', 'KK', 'TF'].includes(j.sumber) ? `<button class="sm" data-bk="${esc(j.ref)}" title="Bukti transaksi">📎${docsOf('kas', j.ref).length || ''}</button> <button class="sm" data-edk="${esc(j.ref)}">Edit</button> <button class="sm dan" data-delk="${esc(j.ref)}">Hapus</button>` : ''}</td></tr>`).join('')}</table>` : empty(filtered ? 'Tidak ada mutasi yang cocok dengan filter' : 'Belum ada mutasi')}</div>`;
 }
 function bindKasBank() {
-  $('#kf').onchange = e => { st.kf = e.target.value; render(); };
-  $('#kt').onchange = e => { st.kt = e.target.value; render(); };
+  $('#kdari').onchange = e => { st.kf = e.target.value; render(); };
+  $('#ksampai').onchange = e => { st.kt = e.target.value; render(); };
   $('#kq').oninput = e => { st.kq = e.target.value; const p = e.target.selectionStart; render(); const el = $('#kq'); el.focus(); el.setSelectionRange(p, p); };
   if ($('#kreset')) $('#kreset').onclick = () => { st.kf = st.kt = st.kq = ''; render(); };
   $('#kxls').onclick = () => (window.eksporKas ? window.eksporKas() : toast('Modul Excel belum termuat, muat ulang halaman', true));
